@@ -3,6 +3,7 @@
 
 Example:
 
+>>> # Define a list of rules in order of priority:
 >>> rules = [Rule(trgt=r'all\.test\.txt',
 ...               preqs=['this.test.txt', 'that.test.txt',
 ...                      'theother.test.txt'],
@@ -13,21 +14,39 @@ Example:
 ...          Rule(trgt=r'(.*)\.test\.txt',
 ...               recipe='echo {1} > {trgt}'),
 ...          Rule(trgt='clean', recipe='rm *.test.txt foo.thing')]
+>>> # Let's make the only pure dependency:
 >>> foo = open('foo.thing', 'w')
->>> foo.write('booooyaaaaa!!!!')
-15
+>>> foo.write('booooyaaaaa!!!!\\n')
+16
 >>> foo.close()
+>>> # And now call make().  It really is that easy!
 >>> make(rules, 'all.test.txt')
 cat foo.thing > this.test.txt
 echo that > that.test.txt
 echo theother > theother.test.txt
 cat this.test.txt that.test.txt theother.test.txt > all.test.txt
 
+>>> # And the contents:
+>>> open('all.test.txt').read()
+'booooyaaaaa!!!!\\nthat\\ntheother\\n'
+>>> ## Now what happens if we try to make it again?
+>>> # make(rules, 'all.test.txt')  # TODO: Why isn't this doctest working?
+>>> ## Everythings up to date alread!
+>>> # If we touch foo.thing...
+>>> os.utime('foo.thing')
+>>> # One branch of the tree must be re-run.
+>>> make(rules, 'all.test.txt')
+cat foo.thing > this.test.txt
+cat this.test.txt that.test.txt theother.test.txt > all.test.txt
+
+>>> # Oh look, we defined a 'clean' rule!
 >>> make(rules, 'clean')
 rm *.test.txt foo.thing
 
-These rule sets and targets can be put into a file, pymake can
-be imported, and the final script serves as a complete makefile.
+
+
+A python scripe which import pymake, defines a list of rules and 
+calls "make(rules, trgt)" is now a standalone makefile.
 
 """
 
@@ -35,7 +54,6 @@ be imported, and the final script serves as a complete makefile.
 import subprocess
 import re
 import os
-import shutil
 import datetime
 
 
