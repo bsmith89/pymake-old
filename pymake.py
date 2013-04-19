@@ -45,7 +45,7 @@ rm *.test.txt foo.thing
 
 
 
-A python scripe which import pymake, defines a list of rules and 
+A python scripe which import pymake, defines a list of rules and
 calls "make(rules, trgt)" is now a standalone makefile.
 
 """
@@ -54,7 +54,8 @@ calls "make(rules, trgt)" is now a standalone makefile.
 import subprocess
 import re
 import os
-import datetime
+from datetime import datetime
+from multiprocessing.pool import ThreadPool as Pool
 
 
 def clean_strings(strings):
@@ -68,6 +69,7 @@ def clean_strings(strings):
         else:
             clean_strings.append(string)
     return clean_strings
+
 
 class Rule():
     def __init__(self, trgt, preqs="",
@@ -90,11 +92,12 @@ class Rule():
                 "recipe='{self.recipe_pattern}', "
                 "env={self.env})").format(trgt=self.target_pattern[1:-1],
                                           self=self)
+
     def __str__(self):
-        return """{trgt} : {preqs}\n\t{self.recipe_pattern}"""\
-                .format(trgt=self.target_pattern[1:-1],
-                        preqs=" ".join(self.prerequisite_patterns),
-                        self=self)
+        return "{trgt} : {preqs}\n\t{self.recipe_pattern}"\
+               .format(trgt=self.target_pattern[1:-1],
+                       preqs=" ".join(self.prerequisite_patterns),
+                       self=self)
 
     def _get_target_match(self, trgt):
         match = re.match(self.target_pattern, trgt)
@@ -205,21 +208,43 @@ def build_task_tree(rules, trgt):
     branch = (task,) + tuple(preq_trees)
     return branch
 
+
 def run_task_tree(tree):
     requirement = tree[0]
     last_tree_update = 0.0
+    last_req_update = requirement.last_update()
     preq_trees = tree[1:]
-    for preq in preq_trees:
-        last_tree_update = max(run_task_tree(preq), last_tree_update)
-    if last_tree_update >= requirement.last_update():
+    if len(preq_trees) != 0:
+        last_tree_update = max(map(run_task_tree, preq_trees))
+    if last_tree_update >= last_req_update:
         requirement.run()
-        return datetime.datetime.now().timestamp()
+        return datetime.now().timestamp()
     else:
-        return max(last_tree_update, requirement.last_update())
+        return max(last_tree_update, last_req_update)
 
-def make(rules, trgt):
+
+def pll_run_task_tree(tree):
+    requirement = tree[0]
+    last_tree_update = 0.0
+    last_req_update = requirement.last_update()
+    preq_trees = tree[1:]
+    if len(preq_trees) != 0:
+        pool = Pool(processes=len(preq_trees))
+        last_tree_update = max(pool.map(pll_run_task_tree, preq_trees))
+    if last_tree_update >= last_req_update:
+        requirement.run()
+        return datetime.now().timestamp()
+    else:
+        return max(last_tree_update, last_req_update)
+
+
+
+def make(rules, trgt, parallel=False):
     tree = build_task_tree(rules, trgt)
-    run_task_tree(tree)
+    if parallel:
+        pll_run_task_tree(tree)
+    else:
+        run_task_tree(tree)
 
 
 if __name__ == "__main__":
