@@ -59,6 +59,7 @@ from multiprocessing.pool import ThreadPool as Pool
 
 
 def clean_strings(strings):
+    """Return a list of strings with None's and empty strings removed."""
     clean_strings = []
     for string in strings:
         if string is None:
@@ -72,6 +73,19 @@ def clean_strings(strings):
 
 
 class Rule():
+    """A task construction and dependency rule.
+
+    A rule is a template for a task, defining:
+    
+    *trgt* - a target pattern; a regular expression matching targets
+             of the rule
+    *preqs* - a list of prerequisite templates
+    *recipe* - a recipe template
+
+    Rules construct Tasks.
+
+    """
+
     def __init__(self, trgt, preqs="",
                  recipe="", env={}):
         # Immediately replace all format identifiers in trgt and preqs.
@@ -100,6 +114,12 @@ class Rule():
                        self=self)
 
     def _get_target_match(self, trgt):
+        """Return a re.Match object for a target.
+
+        The *trgt* string is compared against the rule's target
+        pattern using the *re* module.
+
+        """
         match = re.match(self.target_pattern, trgt)
         if match is not None:
             return match
@@ -108,6 +128,7 @@ class Rule():
                              format(trgt=trgt, ptrn=self.target_pattern))
 
     def applies(self, trgt):
+        """Return if the query target matches the rule's pattern."""
         try:
             self._get_target_match(trgt)
         except ValueError:
@@ -116,12 +137,24 @@ class Rule():
             return True
 
     def _make_preqs(self, trgt):
+        """Return a list of prerequistites for the target.
+
+        Construct pre-requisites by matching the rule's target
+        pattern to the *trgt* string.
+
+        """
         match = self._get_target_match(trgt)
         prerequisites = [match.expand(pattern)
                          for pattern in self.prerequisite_patterns]
         return prerequisites
 
     def _make_recipe(self, trgt):
+        """Return the recipe for the target.
+
+        Construct the recipe by matching the rule's target
+        pattern to the *trgt* string.
+
+        """
         match = self._get_target_match(trgt)
         groups = match.groups()
         mapping = dict(list(self.env.items()))
@@ -132,6 +165,7 @@ class Rule():
         return self.recipe_pattern.format(None, *groups, **mapping)
 
     def make_task(self, trgt):
+        """Return a task reprisentation of rule applied to *trgt*."""
         # The trgt should always match the pattern.
         assert self.applies(trgt)
         return Task(trgt, self._make_preqs(trgt),
@@ -139,6 +173,12 @@ class Rule():
 
 
 class Requirement():
+    """Base class for all requirements.
+
+    This class is also used for file requirements.
+
+    """
+
     def __init__(self, trgt):
         self.target = trgt
 
@@ -149,7 +189,7 @@ class Requirement():
         return self.target
 
     def last_update(self):
-        """Return the last time the requirement was updated.
+        """Return the time that the target was last updated.
 
         The time returned determines the whether or not other tasks are
         considered up to date, so if you want all tasks which depend on
@@ -163,6 +203,8 @@ class Requirement():
 
 
 class Task(Requirement):
+    """A requirement which defines how to make the target."""
+
     def __init__(self, trgt, preqs, recipe):
         super(Task, self).__init__(trgt=trgt)
         self.prerequisites = preqs
@@ -177,12 +219,13 @@ class Task(Requirement):
         return self.recipe
 
     def run(self):
+        """Run the task to create the target."""
         print(self.recipe)
         subprocess.check_call(self.recipe, shell=True)
 
 
 def build_task_tree(rules, trgt):
-    """Build a dependency tree by walking it recursively."""
+    """Build a dependency tree by walking a rules recursively."""
     rules = list(rules)  # Copy the rules list so that we can edit in place.
     trgt = trgt.strip()
     if trgt is None:
@@ -210,6 +253,7 @@ def build_task_tree(rules, trgt):
 
 
 def run_task_tree(tree):
+    """Run a dependency tree by walking it recursively."""
     requirement = tree[0]
     last_tree_update = 0.0
     last_req_update = requirement.last_update()
@@ -224,6 +268,12 @@ def run_task_tree(tree):
 
 
 def pll_run_task_tree(tree):
+    """Run a dependency tree by walking it recursively.
+
+    Parallelize running by making multiple threads for each
+    pre-requisite of a task.
+
+    """
     requirement = tree[0]
     last_tree_update = 0.0
     last_req_update = requirement.last_update()
@@ -240,6 +290,7 @@ def pll_run_task_tree(tree):
 
 
 def make(rules, trgt, parallel=False):
+    """Construct the task tree and run it."""
     tree = build_task_tree(rules, trgt)
     if parallel:
         pll_run_task_tree(tree)
