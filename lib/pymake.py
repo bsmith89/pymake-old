@@ -54,14 +54,19 @@ rm *.test.txt foo.thing
 A python scripe which import pymake, defines a list of rules and
 calls "make(rules, trgt)" is now a standalone makefile.
 
+TODO: Make syntax more consistant by using {1} for the first groups
+rather than \\1.
+
 """
 
 
 import subprocess
 import re
 import os
+import sys
 from datetime import datetime
 from multiprocessing.pool import ThreadPool as Pool
+from termcolor import cprint
 
 
 def clean_strings(strings):
@@ -76,6 +81,9 @@ def clean_strings(strings):
         else:
             clean_strings.append(string)
     return clean_strings
+
+def print_bold(string, **kwargs):
+    cprint(string, attrs=['bold'], **kwargs)
 
 
 class Rule():
@@ -174,8 +182,8 @@ class Rule():
         """Return a task reprisentation of rule applied to *trgt*."""
         # The trgt should always match the pattern.
         assert self.applies(trgt)
-        return Task(trgt, self._make_preqs(trgt),
-                    self._make_recipe(trgt))
+        return TaskReq(trgt, self._make_preqs(trgt),
+                       self._make_recipe(trgt))
 
 
 class Requirement():
@@ -187,7 +195,8 @@ class Requirement():
         self.target = trgt
 
     def __repr__(self):
-        return "{self.__class__}(trgt={self.target!r})".format(self=self)
+        return ("{self.__class__.__name__}"
+                "(trgt={self.target!r})").format(self=self)
 
     def __str__(self):
         return self.target
@@ -218,16 +227,17 @@ class FileReq(Requirement):
             return 0.0
 
 
-class Task(Requirement):
+class TaskReq(Requirement):
     """A requirement which defines how to make the target."""
 
     def __init__(self, trgt, preqs, recipe):
-        super(Task, self).__init__(trgt=trgt)
+        super(TaskReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
         self.recipe = recipe
 
     def __repr__(self):
-        return ("Task(trgt={self.target!r}, preqs={self.prerequisites!r}, "
+        return ("{self.__class__.__name__}(trgt={self.target!r}, "
+                "preqs={self.prerequisites!r}, "
                 "recipe={self.recipe!r})").format(self=self)
 
     def __str__(self):
@@ -244,7 +254,7 @@ class Task(Requirement):
 
     def run(self):
         """Run the task to create the target."""
-        print(self.recipe)  # TODO: make the printout different color.
+        print_bold(self.recipe, file=sys.stderr)
         subprocess.check_call(self.recipe, shell=True)
 
 
@@ -256,9 +266,8 @@ class DepTree():
                                   "not yet been implemented.")
 
 
-
 def build_task_tree(trgt, rules):
-    """Build a dependency tree by walking a rules recursively."""
+    """Build a dependency tree by walking a rules list recursively."""
     rules = list(rules)  # Copy the rules list so that we can edit in place.
     trgt = trgt.strip()
     if trgt is None:
@@ -330,8 +339,12 @@ def make(trgt, rules, parallel=False):
     else:
         run_task_tree(tree)
 
-
-if __name__ == "__main__":
+def system_test0():
+    """Currently almost the same as the unit-test.
+    
+    Assistance for debugging.
+    
+    """
     rules = [Rule(trgt=r'all{some_key}\.test\.txt',
                   preqs=['this.test.txt', 'that.test.txt',
                          'theother.test.txt'],
@@ -344,7 +357,7 @@ if __name__ == "__main__":
                   recipe='echo {1} > {trgt}'),
              Rule(trgt='clean', recipe='rm *.test.txt foo.thing')]
     foo = open('foo.thing', 'w')
-    foo.write('booooyaaaaa!!!!\\n')
+    foo.write('booooyaaaaa!!!!\n')
     foo.close()
     make('all5.test.txt', rules)
     print(open('all5.test.txt').read())
@@ -353,5 +366,13 @@ if __name__ == "__main__":
     # One branch of the tree must be re-run.
     make('all5.test.txt', rules)
     make('clean', rules)
-    #import doctest
-    #doctest.testmod()
+
+def doctest():
+    import doctest
+    doctest.testmod()
+
+if __name__ == "__main__":
+#    doctest()
+#    system_test0()
+    pass
+
