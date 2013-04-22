@@ -8,4 +8,5 @@ setup(name='pymake',
       author='Byron J Smith',
       author_email='bsmith89@gmail.com',
       py_modules=['pymake'],
-      package_dir = {'': 'lib'})
+      package_dir = {'': 'lib'},
+      requires=["termcolor"])
