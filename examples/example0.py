@@ -4,7 +4,7 @@
 from pymake import *  # Simple one line import statetment.
 import sys
 
-env = dict(EXT='test')
+EXT = 'test'
 
 # Standard python code
 # each rule is an object with several attributes
@@ -17,7 +17,7 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", env=env),
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
                       "cat {all_preqs} > {trgt}"),
-              env=env),
+              EXT=EXT),
               # Regex can be used in target (don't forget to escape
               # \'s or use raw strings.) and groups found in the target
               # can be substituted in the pre-reqs and the recipe.
@@ -27,13 +27,13 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", env=env),
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
                       "cat {all_preqs} > {trgt}"),
-              env=env),
+              EXT=EXT),
          Rule(trgt=r"first([0-9])-([0-9]).{EXT}",
               # Groups from the regex can also be used in the recipe.
               recipe=("echo {1} {2}\n"
                       "touch {trgt}"),
-              env=env),
-         Rule(trgt="clean", preqs="", recipe="rm *.{EXT}", env=env)]
+              EXT=EXT),
+         Rule(trgt="clean", preqs="", recipe="rm *.{EXT}", EXT=EXT)]
 
 # Make just requires a list of sequence or iterator of rules
 # And takes arbitrary targets and environmental variables
