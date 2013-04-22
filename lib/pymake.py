@@ -67,6 +67,7 @@ import sys
 from datetime import datetime
 from multiprocessing.pool import ThreadPool as Pool
 from termcolor import cprint
+from functools import partial
 
 
 def clean_strings(strings):
@@ -83,7 +84,7 @@ def clean_strings(strings):
     return clean_strings
 
 def print_bold(string, **kwargs):
-    cprint(string, attrs=['bold'], **kwargs)
+    cprint(string, color='blue', attrs=['bold'], **kwargs)
 
 
 class Rule():
@@ -252,10 +253,12 @@ class TaskReq(Requirement):
         else:
             return 0.0
 
-    def run(self):
+    def run(self, print_recipe=True, execute=True):
         """Run the task to create the target."""
-        print_bold(self.recipe, file=sys.stderr)
-        subprocess.check_call(self.recipe, shell=True)
+        if print_recipe:
+            print_bold(self.recipe, file=sys.stderr)
+        if execute:
+            subprocess.check_call(self.recipe, shell=True)
 
 
 class DepTree():
@@ -294,22 +297,23 @@ def build_task_tree(trgt, rules):
     return branch
 
 
-def run_task_tree(tree):
+def run_task_tree(tree, **kwargs):
     """Run a dependency tree by walking it recursively."""
     requirement = tree[0]
     last_tree_update = 0.0
     last_req_update = requirement.last_update()
     preq_trees = tree[1:]
     if len(preq_trees) != 0:
-        last_tree_update = max(map(run_task_tree, preq_trees))
+        run_tree = partial(run_task_tree, **kwargs)
+        last_tree_update = max(map(run_tree, preq_trees))
     if last_tree_update >= last_req_update:
-        requirement.run()
+        requirement.run(**kwargs)
         return datetime.now().timestamp()
     else:
         return max(last_tree_update, last_req_update)
 
 
-def pll_run_task_tree(tree):
+def pll_run_task_tree(tree, **kwargs):
     """Run a dependency tree by walking it recursively.
 
     Parallelize running by making a new thread for each
@@ -321,23 +325,27 @@ def pll_run_task_tree(tree):
     last_req_update = requirement.last_update()
     preq_trees = tree[1:]
     if len(preq_trees) != 0:
+        # Let's setup the parallelization.
+        run_tree = partial(pll_run_task_tree, **kwargs)
         pool = Pool(processes=len(preq_trees))
-        last_tree_update = max(pool.map(pll_run_task_tree, preq_trees))
+        map = pool.map
+        # Now the rest is exactly the same as run_task_tree...
+        last_tree_update = max(map(run_tree, preq_trees))
     if last_tree_update >= last_req_update:
-        requirement.run()
+        requirement.run(**kwargs)
         return datetime.now().timestamp()
     else:
         return max(last_tree_update, last_req_update)
 
 
 
-def make(trgt, rules, parallel=False):
+def make(trgt, rules, parallel=False, **kwargs):
     """Construct the task tree and run it."""
     tree = build_task_tree(trgt, rules)
     if parallel:
-        pll_run_task_tree(tree)
+        pll_run_task_tree(tree, **kwargs)
     else:
-        run_task_tree(tree)
+        run_task_tree(tree, **kwargs)
 
 def system_test0():
     """Currently almost the same as the unit-test.
@@ -361,7 +369,7 @@ def system_test0():
     foo.close()
     make('all5.test.txt', rules)
     print(open('all5.test.txt').read())
-    make('all5.test.txt', rules)
+    make('all5.test.txt', rules, parallel=True)  # Test parallelized make.
     os.utime('foo.thing')
     # One branch of the tree must be re-run.
     make('all5.test.txt', rules)

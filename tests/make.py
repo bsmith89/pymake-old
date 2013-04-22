@@ -43,6 +43,6 @@ try:
     target = sys.argv[1]
 except IndexError:
     target = "all"
-make(target, rules)
+make(target, rules, parallel=True)
 
 # Environmental variables can not be set in recipes.
