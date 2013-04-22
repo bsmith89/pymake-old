@@ -8,7 +8,7 @@ EXT = 'test'
 
 # Standard python code
 # each rule is an object with several attributes
-rules = [Rule(trgt="all", preqs="test_end.{EXT}", env=env),
+rules = [Rule(trgt="all", preqs="test_end.{EXT}", EXT=EXT),
          Rule(trgt="test_end.{EXT}",
               preqs=("second1.{EXT}", "second2.{EXT}"),
               # Recipe is just a set of bash commands
@@ -22,7 +22,7 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", env=env),
               # \'s or use raw strings.) and groups found in the target
               # can be substituted in the pre-reqs and the recipe.
          Rule(trgt=r"second(.*).{EXT}",
-              preqs=(r"first\1-1.{EXT}", r"first\1-2.{EXT}"),
+              preqs=("first{1}-1.{EXT}", r"first{1}-2.{EXT}"),
               # Various keywords are available to the recipes.
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
@@ -33,7 +33,7 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", env=env),
               recipe=("echo {1} {2}\n"
                       "touch {trgt}"),
               EXT=EXT),
-         Rule(trgt="clean", preqs="", recipe="rm *.{EXT}", EXT=EXT)]
+         Rule(trgt="clean", recipe="rm *.{EXT}", EXT=EXT)]
 
 # Make just requires a list of sequence or iterator of rules
 # And takes arbitrary targets and environmental variables

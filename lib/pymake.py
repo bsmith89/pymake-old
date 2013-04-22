@@ -9,7 +9,7 @@ Example:
 ...                      'theother.test.txt'],
 ...               recipe=('sleep 1\\n'  # Simulates a longer running job.
 ...                       'cat {all_preqs} > all{some_key}.test.txt'),
-...               env=dict(some_key=5)),
+...               some_key=5),
 ...          Rule(trgt=r'this\.test.txt',
 ...               preqs='foo.thing',
 ...               recipe='cat foo.thing > this.test.txt'),
@@ -54,8 +54,10 @@ rm *.test.txt foo.thing
 A python scripe which import pymake, defines a list of rules and
 calls "make(rules, trgt)" is now a standalone makefile.
 
-TODO: Make syntax more consistant by using {1} for the first groups
+DONE: Make syntax more consistant by using {1} for the first groups
 rather than \\1.
+TODO: Parse the dependency tree to compress it into a dependency graph
+      i.e. don't remake identical pre-requisites.
 
 """
 
@@ -66,13 +68,15 @@ import os
 import sys
 from datetime import datetime
 from multiprocessing.pool import ThreadPool as Pool
-from termcolor import cprint
 from functools import partial
+from termcolor import cprint
 
 
 def clean_strings(strings):
     """Return a list of strings with None's and empty strings removed."""
     clean_strings = []
+    if strings is None:
+        return clean_strings
     for string in strings:
         if string is None:
             continue
@@ -82,6 +86,7 @@ def clean_strings(strings):
         else:
             clean_strings.append(string)
     return clean_strings
+
 
 def print_bold(string, **kwargs):
     cprint(string, color='blue', attrs=['bold'], **kwargs)
@@ -101,17 +106,16 @@ class Rule():
 
     """
 
-    def __init__(self, trgt, preqs="",
-                 recipe="", env={}):
-        # Immediately replace all format identifiers in trgt and preqs.
+    def __init__(self, trgt, preqs="", recipe="", **env):
+        # Immediately replace all format identifiers in trgt.
         self.env = env
-        self.target_pattern = "^" + trgt.format_map(env) + "$"
+        self.target_pattern = "^" + trgt.format_map(self.env) + "$"
+        # But not in pre-reqs or the recipe...
         if isinstance(preqs, str):
-            self.prerequisite_patterns = [preqs.format_map(env)]
-        else:
-            self.prerequisite_patterns = [pattern.format_map(env)
-                                          for pattern in preqs]
+            self.prerequisite_patterns = [preqs]
         # TODO: Figure out how to make cleaning the pre-requisites unecessary
+        else:
+            self.prerequisite_patterns = preqs
         self.prerequisite_patterns = clean_strings(self.prerequisite_patterns)
         self.recipe_pattern = recipe
 
@@ -119,8 +123,8 @@ class Rule():
         return ("Rule(trgt='{trgt}', "
                 "preqs={self.prerequisite_patterns}, "
                 "recipe='{self.recipe_pattern}', "
-                "env={self.env})").format(trgt=self.target_pattern[1:-1],
-                                          self=self)
+                "**{self.env})").format(trgt=self.target_pattern[1:-1],
+                                        self=self)
 
     def __str__(self):
         return "{trgt} : {preqs}\n\t{self.recipe_pattern}"\
@@ -128,16 +132,13 @@ class Rule():
                        preqs=" ".join(self.prerequisite_patterns),
                        self=self)
 
-    def _get_target_match(self, trgt):
-        """Return a re.Match object for a target.
-
-        The *trgt* string is compared against the rule's target
-        pattern using the *re* module.
+    def _get_target_groups(self, trgt):
+        """Return a regex groups for a target.
 
         """
         match = re.match(self.target_pattern, trgt)
         if match is not None:
-            return match
+            return match.groups()
         else:
             raise ValueError("{trgt} does not match {ptrn}".
                              format(trgt=trgt, ptrn=self.target_pattern))
@@ -145,7 +146,7 @@ class Rule():
     def applies(self, trgt):
         """Return if the query target matches the rule's pattern."""
         try:
-            self._get_target_match(trgt)
+            self._get_target_groups(trgt)
         except ValueError:
             return False
         else:
@@ -158,8 +159,8 @@ class Rule():
         pattern to the *trgt* string.
 
         """
-        match = self._get_target_match(trgt)
-        prerequisites = [match.expand(pattern)
+        groups = self._get_target_groups(trgt)
+        prerequisites = [pattern.format(None, *groups, trgt=trgt, **self.env)
                          for pattern in self.prerequisite_patterns]
         return prerequisites
 
@@ -170,14 +171,13 @@ class Rule():
         pattern to the *trgt* string.
 
         """
-        match = self._get_target_match(trgt)
-        groups = match.groups()
-        mapping = dict(list(self.env.items()))
-        mapping['trgt'] = trgt
-        mapping['preqs'] = self._make_preqs(trgt)
-        mapping['all_preqs'] = " ".join(mapping['preqs'])
+        groups = self._get_target_groups(trgt)
+        preqs = self._make_preqs(trgt)
+        all_preqs = " ".join(self._make_preqs(trgt))
         # TODO: figure out what I want the first positional arg to be.
-        return self.recipe_pattern.format(None, *groups, **mapping)
+        return self.recipe_pattern.format(None, *groups, trgt=trgt,
+                                          preqs=preqs, all_preqs=all_preqs,
+                                          **self.env)
 
     def make_task(self, trgt):
         """Return a task reprisentation of rule applied to *trgt*."""
@@ -357,7 +357,7 @@ def system_test0():
                   preqs=['this.test.txt', 'that.test.txt',
                          'theother.test.txt'],
                   recipe=('cat {all_preqs} > {trgt}'),
-                  env=dict(some_key=5)),
+                  some_key=5),
              Rule(trgt=r'this\.test.txt',
                   preqs='foo.thing',
                   recipe='cat foo.thing > this.test.txt'),
@@ -381,6 +381,6 @@ def doctest():
 
 if __name__ == "__main__":
 #    doctest()
-#    system_test0()
+    system_test0()
     pass
 
