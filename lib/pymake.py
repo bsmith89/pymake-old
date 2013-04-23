@@ -56,7 +56,7 @@ calls "make(rules, trgt)" is now a standalone makefile.
 
 DONE: Make syntax more consistant by using {1} for the first groups
 rather than \\1.
-TODO: Parse the dependency tree to compress it into a dependency graph
+DONE: Parse the dependency tree to compress it into a dependency graph
       i.e. don't remake identical pre-requisites.
 
 """
@@ -67,7 +67,7 @@ import re
 import os
 import sys
 from datetime import datetime
-from multiprocessing.pool import ThreadPool as Pool
+from multiprocessing.pool import ThreadPool
 from functools import partial
 from collections import defaultdict
 from termcolor import cprint
@@ -202,6 +202,8 @@ class Requirement():
 
     def __str__(self):
         return self.target
+        # For a Requirement object, self.target wholey determines
+        # identity.
 
     def __hash__(self):
         return hash(self.target)
@@ -256,6 +258,7 @@ class TaskReq(Requirement):
         return hash(self.recipe)
 
     def __eq__(self, other):
+        # But for TaskReq objects, the recipe itself determines identity.
         return self.recipe == other.recipe
 
     def last_update(self):
@@ -324,10 +327,26 @@ def build_dep_graph(trgt, rules, required_by=None):
 def run_dep_graph(req, graph, parallel=False, **kwargs):
     last_graph_update = 0.0
     last_req_update = req.last_update()
-    preqs = graph[req]
+    try:
+        # This is the step which prevents double running tasks.
+        # The dependency graph dictionary is shared between the threads,
+        # so poping all of the dependencies forces the task to only be done
+        # once.
+        preqs = graph.pop(req)
+    except KeyError:
+        # When the task has already been done, it's key is removed from
+        # the dictionary.  That means that a KeyError is raised for any
+        # task which has already been run.
+        # The result is that no task is run, and the requirement's update
+        # time is returned.
+        # TODO: are we sure that this won't mess up the scheme I'm using too
+        # figure out when to update requirements?
+        return max(last_graph_update, last_req_update)
     if len(preqs) != 0:
         if parallel:
-            pool = Pool(processes=len(preqs))
+            # The use of a ThreadPool is vital, since the state of the
+            # dependency graph must be shared.
+            pool = ThreadPool(processes=len(preqs))
             map_func = pool.map
         else:
             map_func = map
@@ -379,6 +398,6 @@ def doctest():
 
 if __name__ == "__main__":
 #    doctest()
-    system_test0()
+#    system_test0()
     pass
 
