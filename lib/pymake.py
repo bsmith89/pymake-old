@@ -69,6 +69,7 @@ import sys
 from datetime import datetime
 from multiprocessing.pool import ThreadPool as Pool
 from functools import partial
+from collections import defaultdict
 from termcolor import cprint
 
 
@@ -202,6 +203,12 @@ class Requirement():
     def __str__(self):
         return self.target
 
+    def __hash__(self):
+        return hash(self.target)
+
+    def __eq__(self, other):
+        return self.target == other.target
+
     def last_update(self):
         """Return the time that the target was last updated.
 
@@ -245,6 +252,12 @@ class TaskReq(Requirement):
         # TODO
         return self.recipe
 
+    def __hash__(self):
+        return hash(self.recipe)
+
+    def __eq__(self, other):
+        return self.recipe == other.recipe
+
     def last_update(self):
         if os.path.exists(self.target):
             return os.path.getmtime(self.target)
@@ -261,91 +274,76 @@ class TaskReq(Requirement):
             subprocess.check_call(self.recipe, shell=True)
 
 
-class DepTree():
-    """A dependency tree which is defined recursively."""
-    def __init__(target, preqs=[]):
-        # TODO
-        raise NotImplementedError("The dependency tree data structure has "
-                                  "not yet been implemented.")
+def build_dep_graph(trgt, rules, required_by=None):
+    """Return a dependency graph.
 
+    A dependency graph is a direction network linking tasks to their
+    pre-requisites.
 
-def build_task_tree(trgt, rules):
-    """Build a dependency tree by walking a rules list recursively."""
-    rules = list(rules)  # Copy the rules list so that we can edit in place.
+    This function encodes the graph as a recursive dictionary of Requirement
+    objects.  Each requirement points to it's pre-requisites, which
+    themselves point to their own pre-requisites, etc.
+
+    The returned graph is guarenteed to be acyclic, and the root of the graph
+    has the key *None*.
+
+    """
+    rules = list(rules)
     trgt = trgt.strip()
     if trgt is None:
         return None
     if trgt is "":
         return None
-    target_rule = None
+    trgt_rule = None
     for i, rule in enumerate(rules):
         if rule.applies(trgt):
-            target_rule = rules.pop(i)
+            trgt_rule = rules.pop(i)
             break
-    if target_rule is None:
+    if trgt_rule is None:
         if os.path.exists(trgt):
-            return (FileReq(trgt),)
+            requirement = FileReq(trgt)
+            return {required_by: set([requirement]), requirement: set()}
         else:
             raise ValueError(("No rule defined for {trgt!r}, or there is a "
                               "cycle in the dependency graph.")
                              .format(trgt=trgt))
-    task = target_rule.make_task(trgt)
+    task = trgt_rule.make_task(trgt)
     preqs = task.prerequisites
-    preq_trees = [build_task_tree(preq_trgt, rules)
-                  for preq_trgt in preqs]
-    branch = (task,) + tuple(preq_trees)
-    return branch
+    preq_graphs = [build_dep_graph(preq_trgt, rules, task)
+                   for preq_trgt in preqs]
+    union = defaultdict(set)
+    union[task]  # Initialize a set of pre-reqs for task
+    union[required_by] = set([task])
+    for graph in preq_graphs:
+        for requirement in graph:
+            union[requirement] = union[requirement] | \
+                                 graph[requirement]
+    return dict(union)
 
 
-def run_task_tree(tree, **kwargs):
-    """Run a dependency tree by walking it recursively."""
-    requirement = tree[0]
-    last_tree_update = 0.0
-    last_req_update = requirement.last_update()
-    preq_trees = tree[1:]
-    if len(preq_trees) != 0:
-        run_tree = partial(run_task_tree, **kwargs)
-        last_tree_update = max(map(run_tree, preq_trees))
-    if last_tree_update >= last_req_update:
-        requirement.run(**kwargs)
+def run_dep_graph(req, graph, parallel=False, **kwargs):
+    last_graph_update = 0.0
+    last_req_update = req.last_update()
+    preqs = graph[req]
+    if len(preqs) != 0:
+        if parallel:
+            pool = Pool(processes=len(preqs))
+            map_func = pool.map
+        else:
+            map_func = map
+        run_graph = partial(run_dep_graph, graph=graph, **kwargs)
+        last_graph_update = max(map_func(run_graph, preqs))
+    if last_graph_update >= last_req_update:
+        req.run(**kwargs)
         return datetime.now().timestamp()
     else:
-        return max(last_tree_update, last_req_update)
+        return max(last_graph_update, last_req_update)
 
 
-def pll_run_task_tree(tree, **kwargs):
-    """Run a dependency tree by walking it recursively.
-
-    Parallelize running by making a new thread for each
-    pre-requisite of a task.
-
-    """
-    requirement = tree[0]
-    last_tree_update = 0.0
-    last_req_update = requirement.last_update()
-    preq_trees = tree[1:]
-    if len(preq_trees) != 0:
-        # Let's setup the parallelization.
-        run_tree = partial(pll_run_task_tree, **kwargs)
-        pool = Pool(processes=len(preq_trees))
-        map = pool.map
-        # Now the rest is exactly the same as run_task_tree...
-        last_tree_update = max(map(run_tree, preq_trees))
-    if last_tree_update >= last_req_update:
-        requirement.run(**kwargs)
-        return datetime.now().timestamp()
-    else:
-        return max(last_tree_update, last_req_update)
-
-
-
-def make(trgt, rules, parallel=False, **kwargs):
-    """Construct the task tree and run it."""
-    tree = build_task_tree(trgt, rules)
-    if parallel:
-        pll_run_task_tree(tree, **kwargs)
-    else:
-        run_task_tree(tree, **kwargs)
+def make(trgt, rules, **kwargs):
+    """Construct the dependency graph and run it."""
+    graph = build_dep_graph(trgt, rules)
+    run_dep_graph(graph[None].pop(), graph, **kwargs)
 
 def system_test0():
     """Currently almost the same as the unit-test.
