@@ -277,6 +277,7 @@ class TaskReq(Requirement):
             print_bold(self.recipe, file=sys.stderr)
         if execute:
             subprocess.check_call(self.recipe, shell=True)
+        self.has_run = True
 
 
 def build_dep_graph(trgt, rules, required_by=None):
@@ -364,8 +365,17 @@ def run_dep_graph(req, graph, parallel=False, **kwargs):
 def unduplicate_graph(graph):
     """Probably the most obfuscated code I've ever written.
 
-    But it works!"""
-    graph = dict(graph)
+    But it works!
+    
+    Any of the values in the set of requirements for each node
+    which have a corrisponding node are switched with the actual
+    Requirement object at that node.  Currently we know that they are
+    equal, but we don't actually know that they are the same object.
+
+    See "Difference between eq() and id()".
+    
+    """
+    graph = dict(graph)  # Shallow copy, does it matter?
     for out_node in graph:
         if out_node is None:
             continue
