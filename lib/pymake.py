@@ -192,7 +192,6 @@ class Requirement():
     """Base class for all requirements.
 
     """
-
     def __init__(self, trgt):
         self.target = trgt
 
@@ -244,6 +243,7 @@ class TaskReq(Requirement):
         super(TaskReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
         self.recipe = recipe
+        self.has_run = False
 
     def __repr__(self):
         return ("{self.__class__.__name__}(trgt={self.target!r}, "
@@ -271,6 +271,8 @@ class TaskReq(Requirement):
 
     def run(self, print_recipe=True, execute=True):
         """Run the task to create the target."""
+        if self.has_run:
+            return
         if print_recipe:
             print_bold(self.recipe, file=sys.stderr)
         if execute:
@@ -339,7 +341,7 @@ def run_dep_graph(req, graph, parallel=False, **kwargs):
         # task which has already been run.
         # The result is that no task is run, and the requirement's update
         # time is returned.
-        # TODO: are we sure that this won't mess up the scheme I'm using too
+        # TODO: are we sure that this won't mess up the scheme I'm using to
         # figure out when to update requirements?
         return max(last_graph_update, last_req_update)
     if len(preqs) != 0:
@@ -359,9 +361,26 @@ def run_dep_graph(req, graph, parallel=False, **kwargs):
         return max(last_graph_update, last_req_update)
 
 
+def unduplicate_graph(graph):
+    """Probably the most obfuscated code I've ever written.
+
+    But it works!"""
+    graph = dict(graph)
+    for out_node in graph:
+        if out_node is None:
+            continue
+        for in_node in graph[out_node]:
+            if in_node in graph:
+                graph[out_node].remove(in_node)
+                graph[out_node].add(list(graph)[list(graph).index(in_node)])
+    return(graph)
+
+
 def make(trgt, rules, **kwargs):
     """Construct the dependency graph and run it."""
     graph = build_dep_graph(trgt, rules)
+    # This is a hack, and should be fixed:
+    graph = unduplicate_graph(graph)
     run_dep_graph(graph[None].pop(), graph, **kwargs)
 
 def system_test0():
