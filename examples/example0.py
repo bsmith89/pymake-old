@@ -8,7 +8,7 @@ EXT = 'test'
 
 # Standard python code
 # each rule is an object with several attributes
-rules = [Rule(trgt="all", preqs="test_end.{EXT}", EXT=EXT),
+rules = [Rule(trgt="all", preqs=("test_end.{EXT}",), EXT=EXT),
          Rule(trgt="test_end.{EXT}",
               preqs=("second1.{EXT}", "second2.{EXT}"),
               # Recipe is just a set of bash commands
@@ -16,7 +16,8 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", EXT=EXT),
               # here.
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
-                      "cat {all_preqs} > {trgt}"),
+                      "cat {all_preqs} > {trgt}\n"
+                      "sleep 1"),
               EXT=EXT),
               # Regex can be used in target (don't forget to escape
               # \'s or use raw strings.) and groups found in the target
@@ -26,12 +27,14 @@ rules = [Rule(trgt="all", preqs="test_end.{EXT}", EXT=EXT),
               # Various keywords are available to the recipes.
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
-                      "cat {all_preqs} > {trgt}"),
+                      "cat {all_preqs} > {trgt}\n"
+                      "sleep 1"),
               EXT=EXT),
          Rule(trgt=r"first([0-9])-([0-9]).{EXT}",
               # Groups from the regex can also be used in the recipe.
               recipe=("echo {1} {2}\n"
-                      "touch {trgt}"),
+                      "touch {trgt}\n"
+                      "sleep 1"),
               EXT=EXT),
          Rule(trgt="clean", recipe="rm *.{EXT}", EXT=EXT)]
 

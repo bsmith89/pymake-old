@@ -1,63 +1,9 @@
 #! /usr/bin/env python
 """A GNU Make replacement in python.
 
-Example:
-
->>> # Define a list of rules in order of priority:
->>> rules = [Rule(trgt=r'all{some_key}\.test\.txt',
-...               preqs=['this.test.txt', 'that.test.txt',
-...                      'theother.test.txt'],
-...               recipe=('sleep 1\\n'  # Simulates a longer running job.
-...                       'cat {all_preqs} > all{some_key}.test.txt'),
-...               some_key=5),
-...          Rule(trgt=r'this\.test.txt',
-...               preqs='foo.thing',
-...               recipe='cat foo.thing > this.test.txt'),
-...          Rule(trgt=r'(.*)\.test\.txt',
-...               recipe='echo {1} > {trgt}'),
-...          Rule(trgt='clean', recipe='rm *.test.txt foo.thing')]
->>> # Let's make the only pure dependency:
->>> foo = open('foo.thing', 'w')
->>> foo.write('booooyaaaaa!!!!\\n')
-16
->>> foo.close()
->>> import time
->>> time.sleep(1)  # Because otherwise the timestamps are too similar.
->>> # And now call make().  It really is that easy!
->>> make('all5.test.txt', rules)
-cat foo.thing > this.test.txt
-echo that > that.test.txt
-echo theother > theother.test.txt
-sleep 1
-cat this.test.txt that.test.txt theother.test.txt > all5.test.txt
-
->>> # And the contents:
->>> open('all5.test.txt').read()
-'booooyaaaaa!!!!\\nthat\\ntheother\\n'
->>> # Now what happens if we try to make it again?
->>> make('all5.test.txt', rules)
->>> # Everythings up to date alread!
->>> # If we touch foo.thing...
->>> os.utime('foo.thing')
->>> # One branch of the tree must be re-run.
->>> make('all5.test.txt', rules)
-cat foo.thing > this.test.txt
-sleep 1
-cat this.test.txt that.test.txt theother.test.txt > all5.test.txt
-
->>> # Oh look, we defined a 'clean' rule!
->>> make('clean', rules)
-rm *.test.txt foo.thing
-
-
 
 A python scripe which import pymake, defines a list of rules and
 calls "make(rules, trgt)" is now a standalone makefile.
-
-DONE: Make syntax more consistant by using {1} for the first groups
-rather than \\1.
-DONE: Parse the dependency tree to compress it into a dependency graph
-      i.e. don't remake identical pre-requisites.
 
 """
 
@@ -66,27 +12,13 @@ import subprocess
 import re
 import os
 import sys
-from datetime import datetime
-from multiprocessing.pool import ThreadPool
-from functools import partial
+import itertools
+#from datetime import datetime
+#from multiprocessing.pool import ThreadPool
+from threading import Thread
+#from functools import partial
 from collections import defaultdict
 from termcolor import cprint
-
-
-def clean_strings(strings):
-    """Return a list of strings with None's and empty strings removed."""
-    clean_strings = []
-    if strings is None:
-        return clean_strings
-    for string in strings:
-        if string is None:
-            continue
-        string = string.strip()
-        if string == "":
-            continue
-        else:
-            clean_strings.append(string)
-    return clean_strings
 
 
 def print_bold(string, **kwargs):
@@ -97,7 +29,7 @@ class Rule():
     """A task construction and dependency rule.
 
     A rule is a template for a task, defining:
-    
+
     *trgt* - a target pattern; a regular expression matching targets
              of the rule
     *preqs* - a list of prerequisite templates
@@ -107,17 +39,12 @@ class Rule():
 
     """
 
-    def __init__(self, trgt, preqs="", recipe="", **env):
+    def __init__(self, trgt, preqs=[], recipe='', **env):
         # Immediately replace all format identifiers in trgt.
         self.env = env
         self.target_pattern = "^" + trgt.format_map(self.env) + "$"
         # But not in pre-reqs or the recipe...
-        if isinstance(preqs, str):
-            self.prerequisite_patterns = [preqs]
-        # TODO: Figure out how to make cleaning the pre-requisites unecessary
-        else:
-            self.prerequisite_patterns = preqs
-        self.prerequisite_patterns = clean_strings(self.prerequisite_patterns)
+        self.prerequisite_patterns = [pattern.strip() for pattern in preqs]
         self.recipe_pattern = recipe
 
     def __repr__(self):
@@ -128,13 +55,13 @@ class Rule():
                                         self=self)
 
     def __str__(self):
-        return "{trgt} : {preqs}\n\t{self.recipe_pattern}"\
+        return "{trgt} : {preqs}\n{self.recipe_pattern}"\
                .format(trgt=self.target_pattern[1:-1],
                        preqs=" ".join(self.prerequisite_patterns),
                        self=self)
 
     def _get_target_groups(self, trgt):
-        """Return a regex groups for a target.
+        """Return regex groups for a target.
 
         """
         match = re.match(self.target_pattern, trgt)
@@ -175,7 +102,6 @@ class Rule():
         groups = self._get_target_groups(trgt)
         preqs = self._make_preqs(trgt)
         all_preqs = " ".join(self._make_preqs(trgt))
-        # TODO: figure out what I want the first positional arg to be.
         return self.recipe_pattern.format(None, *groups, trgt=trgt,
                                           preqs=preqs, all_preqs=all_preqs,
                                           **self.env)
@@ -187,11 +113,22 @@ class Rule():
         return TaskReq(trgt, self._make_preqs(trgt),
                        self._make_recipe(trgt))
 
+    def make_req(self, trgt):
+        self.make_task(self, trgt)
+
 
 class Requirement():
     """Base class for all requirements.
 
+    Requirements are items which must be verified or carried out in a
+    particular order.  All requirements have a "target" which should be
+    a unique identifier for the requirement, usually a file path.
+
+    A Rule produces a particular type of requirement called a Task
+    which consists of the filled in recipe template.
+
     """
+
     def __init__(self, trgt):
         self.target = trgt
 
@@ -226,6 +163,7 @@ class Requirement():
 
 class FileReq(Requirement):
     """A Requirement subclass used for file requirements."""
+
     def __init__(self, trgt_path):
         super(FileReq, self).__init__(trgt = trgt_path)
 
@@ -243,7 +181,7 @@ class TaskReq(Requirement):
         super(TaskReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
         self.recipe = recipe
-        self.has_run = False
+        self._has_run = False  # This is just a defensive move.
 
     def __repr__(self):
         return ("{self.__class__.__name__}(trgt={self.target!r}, "
@@ -264,20 +202,17 @@ class TaskReq(Requirement):
     def last_update(self):
         if os.path.exists(self.target):
             return os.path.getmtime(self.target)
-        elif self.prerequisites in (None, [], "", [""]):
-            return 0.0
         else:
             return 0.0
 
     def run(self, print_recipe=True, execute=True):
         """Run the task to create the target."""
-        if self.has_run:
-            return
+        assert not self._has_run  # Defensive...
         if print_recipe:
             print_bold(self.recipe, file=sys.stderr)
         if execute:
             subprocess.check_call(self.recipe, shell=True)
-        self.has_run = True
+        self._has_run = True
 
 
 def build_dep_graph(trgt, rules, required_by=None):
@@ -327,106 +262,65 @@ def build_dep_graph(trgt, rules, required_by=None):
     return dict(union)
 
 
-def run_dep_graph(req, graph, parallel=False, **kwargs):
+# The root of the graph is the one item in the set pointed to by the key None.
+get_dep_graph_root = lambda graph: graph.pop(None).pop()
+
+
+def merge_orders(*iters):
+    """Yield sets, where equal items are only returned once.
+    
+    Takes any number of iterators of sets and merges sets from the front."""
+    returned_set = {None}  # So that None will never be returned
+    for priority_orders in itertools.zip_longest(*iters, fillvalue={}):
+        priority_set = set.union(*priority_orders)
+        priority_set -= returned_set
+        returned_set |= priority_set
+        if priority_set != set():
+            yield priority_set
+
+
+def build_orders(req, graph):
     last_graph_update = 0.0
     last_req_update = req.last_update()
-    try:
-        # This is the step which prevents double running tasks.
-        # The dependency graph dictionary is shared between the threads,
-        # so poping all of the dependencies forces the task to only be done
-        # once.
-        preqs = graph.pop(req)
-    except KeyError:
-        # When the task has already been done, it's key is removed from
-        # the dictionary.  That means that a KeyError is raised for any
-        # task which has already been run.
-        # The result is that no task is run, and the requirement's update
-        # time is returned.
-        # TODO: are we sure that this won't mess up the scheme I'm using to
-        # figure out when to update requirements?
-        return max(last_graph_update, last_req_update)
-    if len(preqs) != 0:
-        if parallel:
-            # The use of a ThreadPool is vital, since the state of the
-            # dependency graph must be shared.
-            pool = ThreadPool(processes=len(preqs))
-            map_func = pool.map
+    if (req not in graph) or (len(graph[req]) == 0):
+        try:  # Duck typing
+            req.run
+        except AttributeError:
+            return [set()], last_req_update
         else:
-            map_func = map
-        run_graph = partial(run_dep_graph, graph=graph, **kwargs)
-        last_graph_update = max(map_func(run_graph, preqs))
+            return [{req}], last_req_update
+    preq_update_times = []
+    preq_orders_lists = []
+    for preq in graph[req]:
+        orders_list, update_time = build_orders(preq, graph)
+        preq_orders_lists.append(orders_list)
+        preq_update_times.append(update_time)
+    last_graph_update = max(preq_update_times)
+    preq_orders_list = list(merge_orders(*preq_orders_lists))
     if last_graph_update >= last_req_update:
-        req.run(**kwargs)
-        return datetime.now().timestamp()
+        return [{req}] + preq_orders_list, last_graph_update
     else:
-        return max(last_graph_update, last_req_update)
+        return [set()], last_req_update
 
 
-def unduplicate_graph(graph):
-    """Probably the most obfuscated code I've ever written.
-
-    But it works!
-    
-    Any of the values in the set of requirements for each node
-    which have a corrisponding node are switched with the actual
-    Requirement object at that node.  Currently we know that they are
-    equal, but we don't actually know that they are the same object.
-
-    See "Difference between eq() and id()".
-    
-    """
-    graph = dict(graph)  # Shallow copy, does it matter?
-    for out_node in graph:
-        if out_node is None:
-            continue
-        for in_node in graph[out_node]:
-            if in_node in graph:
-                graph[out_node].remove(in_node)
-                graph[out_node].add(list(graph)[list(graph).index(in_node)])
-    return(graph)
+def run_orders(orders, parallel=False, **kwargs):
+    for order_set in reversed(orders):
+        threads = [Thread(target=task.run, kwargs=kwargs)
+                   for task in order_set]
+        if parallel:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        else:
+            for thread in threads:
+                thread.start()
+                thread.join()
 
 
 def make(trgt, rules, **kwargs):
     """Construct the dependency graph and run it."""
     graph = build_dep_graph(trgt, rules)
-    # This is a hack, and should be fixed:
-    graph = unduplicate_graph(graph)
-    run_dep_graph(graph[None].pop(), graph, **kwargs)
-
-def system_test0():
-    """Currently almost the same as the unit-test.
-    
-    Assistance for debugging.
-    
-    """
-    rules = [Rule(trgt=r'all{some_key}\.test\.txt',
-                  preqs=['this.test.txt', 'that.test.txt',
-                         'theother.test.txt'],
-                  recipe=('cat {all_preqs} > {trgt}'),
-                  some_key=5),
-             Rule(trgt=r'this\.test.txt',
-                  preqs='foo.thing',
-                  recipe='cat foo.thing > this.test.txt'),
-             Rule(trgt=r'(.*)\.test\.txt',
-                  recipe='echo {1} > {trgt}'),
-             Rule(trgt='clean', recipe='rm *.test.txt foo.thing')]
-    foo = open('foo.thing', 'w')
-    foo.write('booooyaaaaa!!!!\n')
-    foo.close()
-    make('all5.test.txt', rules)
-    print(open('all5.test.txt').read())
-    make('all5.test.txt', rules, parallel=True)  # Test parallelized make.
-    os.utime('foo.thing')
-    # One branch of the tree must be re-run.
-    make('all5.test.txt', rules)
-    make('clean', rules)
-
-def doctest():
-    import doctest
-    doctest.testmod()
-
-if __name__ == "__main__":
-#    doctest()
-#    system_test0()
-    pass
-
+    root = get_dep_graph_root(graph)
+    orders, newest_order_update = build_orders(root, graph)
+    run_orders(orders, **kwargs)
