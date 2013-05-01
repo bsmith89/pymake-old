@@ -39,7 +39,7 @@ class Rule():
 
     """
 
-    def __init__(self, trgt, preqs=[], recipe='', **env):
+    def __init__(self, trgt, preqs=[], recipe=None, **env):
         # Immediately replace all format identifiers in trgt.
         self.env = env
         self.target_pattern = "^" + trgt.format_map(self.env) + "$"
@@ -49,9 +49,9 @@ class Rule():
 
     def __repr__(self):
         return ("Rule(trgt='{trgt}', "
-                "preqs={self.prerequisite_patterns}, "
-                "recipe='{self.recipe_pattern}', "
-                "**{self.env})").format(trgt=self.target_pattern[1:-1],
+                "preqs={self.prerequisite_patterns!r}, "
+                "recipe={self.recipe_pattern!r}, "
+                "**{self.env!r})").format(trgt=self.target_pattern[1:-1],
                                         self=self)
 
     def __str__(self):
@@ -99,6 +99,8 @@ class Rule():
         pattern to the *trgt* string.
 
         """
+        if self.recipe_pattern is None:
+            return None
         groups = self._get_target_groups(trgt)
         preqs = self._make_preqs(trgt)
         all_preqs = " ".join(self._make_preqs(trgt))
@@ -110,8 +112,11 @@ class Rule():
         """Return a task reprisentation of rule applied to *trgt*."""
         # The trgt should always match the pattern.
         assert self.applies(trgt)
-        return TaskReq(trgt, self._make_preqs(trgt),
-                       self._make_recipe(trgt))
+        if self.recipe_pattern is None:
+            return DummyReq(trgt, self._make_preqs(trgt))
+        else:
+            return TaskReq(trgt, self._make_preqs(trgt),
+                   self._make_recipe(trgt))
 
     def make_req(self, trgt):
         self.make_task(self, trgt)
@@ -165,7 +170,7 @@ class FileReq(Requirement):
     """A Requirement subclass used for file requirements."""
 
     def __init__(self, trgt_path):
-        super(FileReq, self).__init__(trgt = trgt_path)
+        super(FileReq, self).__init__(trgt=trgt_path)
 
     def last_update(self):
         if os.path.exists(self.target):
@@ -189,7 +194,6 @@ class TaskReq(Requirement):
                 "recipe={self.recipe!r})").format(self=self)
 
     def __str__(self):
-        # TODO
         return self.recipe
 
     def __hash__(self):
@@ -205,7 +209,7 @@ class TaskReq(Requirement):
         else:
             return 0.0
 
-    def run(self, print_recipe=True, execute=True):
+    def run(self, print_recipe=True, execute=True, **kwargs):
         """Run the task to create the target."""
         assert not self._has_run  # Defensive...
         if print_recipe:
@@ -213,6 +217,22 @@ class TaskReq(Requirement):
         if execute:
             subprocess.check_call(self.recipe, shell=True)
         self._has_run = True
+
+
+class DummyReq(Requirement):
+    """A requirement which only points to other requirements."""
+
+    def __init__(self, name, preqs):
+        super(DummyReq, self).__init__(trgt=name)
+        self.prerequisites = preqs
+
+    def last_update(self):
+        return 0.0
+
+    def run(self, print_recipe=True, **kwargs):
+        if print_recipe:
+            print("Nothing left to do for header '{trgt}'"
+                  .format(trgt=self.target))
 
 
 def build_dep_graph(trgt, rules, required_by=None):

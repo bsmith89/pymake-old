@@ -8,7 +8,8 @@ EXT = 'test'
 
 # Standard python code
 # each rule is an object with several attributes
-rules = [Rule(trgt="all", preqs=("test_end.{EXT}",), EXT=EXT),
+rules = [Rule("all", preqs=["top"]),
+        Rule(trgt="top", preqs=("test_end.{EXT}",), EXT=EXT),
          Rule(trgt="test_end.{EXT}",
               preqs=("second1.{EXT}", "second2.{EXT}"),
               # Recipe is just a set of bash commands
