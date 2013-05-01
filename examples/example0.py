@@ -43,10 +43,11 @@ rules = [Rule("all", preqs=["top"]),
 # And takes arbitrary targets and environmental variables
 # are available to recipes.
 
-try:
-    target = sys.argv[1]
-except IndexError:
-    target = "all"
-make(target, rules, parallel=True)
+if __name__ == '__main__':
+    try:
+        target = sys.argv[1]
+    except IndexError:
+        target = "all"
+    make(target, rules, parallel=True)
 
 # Environmental variables can not be set in recipes.
