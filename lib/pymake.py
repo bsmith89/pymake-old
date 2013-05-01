@@ -16,6 +16,7 @@ import itertools
 #from datetime import datetime
 #from multiprocessing.pool import ThreadPool
 from threading import Thread
+#from multiprocessing import Process as Thread
 #from functools import partial
 from collections import defaultdict
 from termcolor import cprint
@@ -283,7 +284,7 @@ def build_dep_graph(trgt, rules, required_by=None):
 
 
 # The root of the graph is the one item in the set pointed to by the key None.
-get_dep_graph_root = lambda graph: graph.pop(None).pop()
+pop_dep_graph_root = lambda graph: graph.pop(None).pop()
 
 
 def merge_orders(*iters):
@@ -341,6 +342,6 @@ def run_orders(orders, parallel=False, **kwargs):
 def make(trgt, rules, **kwargs):
     """Construct the dependency graph and run it."""
     graph = build_dep_graph(trgt, rules)
-    root = get_dep_graph_root(graph)
+    root = pop_dep_graph_root(graph)
     orders, newest_order_update = build_orders(root, graph)
     run_orders(orders, **kwargs)
