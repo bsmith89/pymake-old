@@ -292,7 +292,7 @@ def merge_orders(*iters):
     
     Takes any number of iterators of sets and merges sets from the front."""
     returned_set = {None}  # So that None will never be returned
-    for priority_orders in itertools.zip_longest(*iters, fillvalue={}):
+    for priority_orders in itertools.zip_longest(*iters, fillvalue=set()):
         priority_set = set.union(*priority_orders)
         priority_set -= returned_set
         returned_set |= priority_set
@@ -345,3 +345,26 @@ def make(trgt, rules, **kwargs):
     root = pop_dep_graph_root(graph)
     orders, newest_order_update = build_orders(root, graph)
     run_orders(orders, **kwargs)
+
+
+def visualize_graph(trgt, rules, outpath=None):
+    if outpath == None:
+        import __main__
+        outpath = ".".join(os.path.basename(__main__.__file__), 'png')
+    import pydot
+    graph = build_dep_graph(trgt, rules)
+    root = pop_dep_graph_root(graph)
+    orders, newester_order_update = build_orders(root, graph)
+    dot = pydot.Dot(graph_name="Dependency", graph_type='digraph',
+                    labelloc='r', rankdir="RL")
+    dot.set_node_defaults(shape='ellipse', fontsize=24)
+    for req in graph:
+        for preq in graph[req]:
+            dot.add_edge(pydot.Edge(req.target, preq.target))
+    for rank, rank_reqs in enumerate(orders):
+        rank_plate = pydot.Cluster(graph_name=str(rank),
+                                   label="Rank {r}".format(r=rank))
+        for req in rank_reqs:
+            rank_plate.add_node(pydot.Node(req.target))
+        dot.add_subgraph(rank_plate)
+    return dot.write_png(outpath)
