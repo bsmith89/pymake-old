@@ -48,6 +48,7 @@ if __name__ == '__main__':
         target = sys.argv[1]
     except IndexError:
         target = "all"
+    visualize_graph(target, rules)
     make(target, rules, parallel=True)
 
 # Environmental variables can not be set in recipes.

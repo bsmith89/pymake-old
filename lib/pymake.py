@@ -350,7 +350,7 @@ def make(trgt, rules, **kwargs):
 def visualize_graph(trgt, rules, outpath=None):
     if outpath == None:
         import __main__
-        outpath = ".".join(os.path.basename(__main__.__file__), 'png')
+        outpath = ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
     import pydot
     graph = build_dep_graph(trgt, rules)
     root = pop_dep_graph_root(graph)
@@ -361,9 +361,9 @@ def visualize_graph(trgt, rules, outpath=None):
     for req in graph:
         for preq in graph[req]:
             dot.add_edge(pydot.Edge(req.target, preq.target))
-    for rank, rank_reqs in enumerate(orders):
+    for rank, rank_reqs in enumerate(orders, 1):
         rank_plate = pydot.Cluster(graph_name=str(rank),
-                                   label="Rank {r}".format(r=rank))
+                                   label="Parallel Set {r}".format(r=rank))
         for req in rank_reqs:
             rank_plate.add_node(pydot.Node(req.target))
         dot.add_subgraph(rank_plate)
