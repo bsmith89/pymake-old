@@ -10,5 +10,6 @@ setup(name='pymake',
       py_modules=['pymake'],
       package_dir = {'': 'lib'},
       install_requires=["termcolor"],
-      extras_require={"visualize": ["pydot >= 1.0.15"]},
-      dependency_links = ["hg+https://bitbucket.org/prologic/pydot"])
+      extras_require={"FIG": ["pydot-py3 >= 1.0.15"]},
+      dependency_links = [("git+https://github.com/bsmith89/"
+                           "pydot-py3.git#egg=pydot-py3-1.0.15")])
