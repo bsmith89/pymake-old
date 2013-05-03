@@ -1,9 +1,12 @@
 #! /usr/bin/env python
 """A GNU Make replacement in python.
 
-
 A python scripe which import pymake, defines a list of rules and
 calls "make(rules, trgt)" is now a standalone makefile.
+
+Internally, rules are parsed into a dependency tree of "requirements",
+this is compressed into a hierarchical list of orders, and then the
+orders are executed.
 
 """
 
@@ -13,16 +16,12 @@ import re
 import os
 import sys
 import itertools
-#from datetime import datetime
-#from multiprocessing.pool import ThreadPool
 from threading import Thread
-#from multiprocessing import Process as Thread
-#from functools import partial
 from collections import defaultdict
 from termcolor import cprint
 
 
-def print_bold(string, **kwargs):
+def print_recipe(string, **kwargs):
     cprint(string, color='blue', attrs=['bold'], **kwargs)
 
 
@@ -41,41 +40,46 @@ class Rule():
     """
 
     def __init__(self, trgt, preqs=[], recipe=None, **env):
-        # Immediately replace all format identifiers in trgt.
         self.env = env
-        self.target_pattern = "^" + trgt.format_map(self.env) + "$"
-        # But not in pre-reqs or the recipe...
-        self.prerequisite_patterns = [pattern.strip() for pattern in preqs]
-        self.recipe_pattern = recipe
+        self.target_template = trgt
+        self.prerequisite_templates = [template.strip() for template in preqs]
+        self.recipe_template = recipe
 
     def __repr__(self):
-        return ("Rule(trgt='{trgt}', "
-                "preqs={self.prerequisite_patterns!r}, "
-                "recipe={self.recipe_pattern!r}, "
-                "**{self.env!r})").format(trgt=self.target_pattern[1:-1],
-                                        self=self)
+        return ("Rule(trgt={self.target_template!r}, "
+                "preqs={self.prerequisite_templates!r}, "
+                "recipe={self.recipe_template!r}, "
+                "**{self.env!r})").format(self=self)
 
     def __str__(self):
-        return "{trgt} : {preqs}\n{self.recipe_pattern}"\
-               .format(trgt=self.target_pattern[1:-1],
-                       preqs=" ".join(self.prerequisite_patterns),
-                       self=self)
+        return ("{self.target_template} : {self.prerequisite_templates}\n"
+                "{self.recipe_template}").format(self=self)
 
-    def _get_target_groups(self, trgt):
+    def _get_target_pattern(self):
+        """Return the target pattern.
+
+        The target pattern is returned as an exact regex.
+        (i.e. with ^ and $ around it.)
+
+        """
+        return "^" + self.target_template.format(**self.env) + "$"
+
+    def _make_target_groups(self, trgt):
         """Return regex groups for a target.
 
         """
-        match = re.match(self.target_pattern, trgt)
+        target_pattern = self._get_target_pattern()
+        match = re.match(target_pattern, trgt)
         if match is not None:
             return match.groups()
         else:
             raise ValueError("{trgt} does not match {ptrn}".
-                             format(trgt=trgt, ptrn=self.target_pattern))
+                             format(trgt=trgt, ptrn=target_pattern))
 
     def applies(self, trgt):
         """Return if the query target matches the rule's pattern."""
         try:
-            self._get_target_groups(trgt)
+            self._make_target_groups(trgt)
         except ValueError:
             return False
         else:
@@ -89,8 +93,8 @@ class Rule():
 
         """
         groups = self._get_target_groups(trgt)
-        prerequisites = [pattern.format(None, *groups, trgt=trgt, **self.env)
-                         for pattern in self.prerequisite_patterns]
+        prerequisites = [template.format(None, *groups, trgt=trgt, **self.env)
+                         for template in self.prerequisite_templates]
         return prerequisites
 
     def _make_recipe(self, trgt):
@@ -100,14 +104,14 @@ class Rule():
         pattern to the *trgt* string.
 
         """
-        if self.recipe_pattern is None:
+        if self.recipe_template is None:
             return None
         groups = self._get_target_groups(trgt)
         preqs = self._make_preqs(trgt)
-        all_preqs = " ".join(self._make_preqs(trgt))
-        return self.recipe_pattern.format(None, *groups, trgt=trgt,
-                                          preqs=preqs, all_preqs=all_preqs,
-                                          **self.env)
+        all_preqs = " ".join(preqs)
+        return self.recipe_template.format(None, *groups, trgt=trgt,
+                                           preqs=preqs, all_preqs=all_preqs,
+                                           **self.env)
 
     def make_task(self, trgt):
         """Return a task reprisentation of rule applied to *trgt*."""
@@ -117,7 +121,7 @@ class Rule():
             return DummyReq(trgt, self._make_preqs(trgt))
         else:
             return TaskReq(trgt, self._make_preqs(trgt),
-                   self._make_recipe(trgt))
+                           self._make_recipe(trgt))
 
     def make_req(self, trgt):
         self.make_task(self, trgt)
@@ -168,7 +172,7 @@ class Requirement():
 
 
 class FileReq(Requirement):
-    """A Requirement subclass used for file requirements."""
+    """A Requirement subclass used for files"""
 
     def __init__(self, trgt_path):
         super(FileReq, self).__init__(trgt=trgt_path)
@@ -214,7 +218,7 @@ class TaskReq(Requirement):
         """Run the task to create the target."""
         assert not self._has_run  # Defensive...
         if print_recipe:
-            print_bold(self.recipe, file=sys.stderr)
+            print_recipe(self.recipe, file=sys.stderr)
         if execute:
             subprocess.check_call(self.recipe, shell=True)
         self._has_run = True
@@ -249,6 +253,10 @@ def build_dep_graph(trgt, rules, required_by=None):
     The returned graph is guarenteed to be acyclic, and the root of the graph
     has the key *None*.
 
+    Operates recursively.
+
+    TODO: Is the "required_by" kwarg really necessary?
+
     """
     rules = list(rules)
     trgt = trgt.strip()
@@ -278,19 +286,37 @@ def build_dep_graph(trgt, rules, required_by=None):
     union[required_by] = set([task])
     for graph in preq_graphs:
         for requirement in graph:
-            union[requirement] = union[requirement] | \
-                                 graph[requirement]
+            union[requirement] = union[requirement] | graph[requirement]
     return dict(union)
 
 
-# The root of the graph is the one item in the set pointed to by the key None.
-pop_dep_graph_root = lambda graph: graph.pop(None).pop()
+def pop_dep_graph_root(graph):
+    """Return the target of the dependency graph
+
+    As it is currently designed, *build_dep_graph* returns a dictionary
+    where the root requirement (the requirement associated with the *trgt*
+    argument) is the only member of a set with the key *None*.
+
+    As per the name "pop", this function removes and returns that root
+    requirement.
+
+    TODO: Build the software so this silly, breakable function isn't
+          necessary.
+
+    """
+    return graph.pop(None).pop()
 
 
 def merge_orders(*iters):
     """Yield sets, where equal items are only returned once.
-    
-    Takes any number of iterators of sets and merges sets from the front."""
+
+    Takes any number of iterators of sets and merges sets from the front.
+
+    This function is meant to deal with the semi-ordered (i.e. ordered,
+    but with multiple equivilant entries) lists of requirements
+    which must be merged together.
+
+    """
     returned_set = {None}  # So that None will never be returned
     for priority_orders in itertools.zip_longest(*iters, fillvalue=set()):
         priority_set = set.union(*priority_orders)
@@ -301,6 +327,15 @@ def merge_orders(*iters):
 
 
 def build_orders(req, graph):
+    """Return a list of requirements in priority order.
+
+    Given a dependency graph and a root requirement, returns a list
+    of sets.  The items in every set only depend on items further down the
+    order list.
+
+    Operates recursively.
+
+    """
     last_graph_update = 0.0
     last_req_update = req.last_update()
     if (req not in graph) or (len(graph[req]) == 0):
@@ -325,6 +360,11 @@ def build_orders(req, graph):
 
 
 def run_orders(orders, parallel=False, **kwargs):
+    """Execute each requirement in a dependency list in order.
+
+    If *parallel* == True, a requirement set is run in parallel.
+
+    """
     for order_set in reversed(orders):
         threads = [Thread(target=task.run, kwargs=kwargs)
                    for task in order_set]
@@ -348,7 +388,13 @@ def make(trgt, rules, **kwargs):
 
 
 def visualize_graph(trgt, rules, outpath=None):
-    if outpath == None:
+    """Draw a figure representing the dependency graph.
+
+    By default writes the graph to a file named the same as the calling
+    script.
+
+    """
+    if outpath is None:
         import __main__
         outpath = ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
     import pydot
