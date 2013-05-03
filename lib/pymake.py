@@ -92,7 +92,7 @@ class Rule():
         pattern to the *trgt* string.
 
         """
-        groups = self._get_target_groups(trgt)
+        groups = self._make_target_groups(trgt)
         prerequisites = [template.format(None, *groups, trgt=trgt, **self.env)
                          for template in self.prerequisite_templates]
         return prerequisites
@@ -106,7 +106,7 @@ class Rule():
         """
         if self.recipe_template is None:
             return None
-        groups = self._get_target_groups(trgt)
+        groups = self._make_target_groups(trgt)
         preqs = self._make_preqs(trgt)
         all_preqs = " ".join(preqs)
         return self.recipe_template.format(None, *groups, trgt=trgt,
@@ -117,7 +117,7 @@ class Rule():
         """Return a task reprisentation of rule applied to *trgt*."""
         # The trgt should always match the pattern.
         assert self.applies(trgt)
-        if self.recipe_pattern is None:
+        if self.recipe_template is None:
             return DummyReq(trgt, self._make_preqs(trgt))
         else:
             return TaskReq(trgt, self._make_preqs(trgt),
@@ -214,10 +214,10 @@ class TaskReq(Requirement):
         else:
             return 0.0
 
-    def run(self, print_recipe=True, execute=True, **kwargs):
+    def run(self, verbose=1, execute=True, **kwargs):
         """Run the task to create the target."""
         assert not self._has_run  # Defensive...
-        if print_recipe:
+        if verbose >= 1:
             print_recipe(self.recipe, file=sys.stderr)
         if execute:
             subprocess.check_call(self.recipe, shell=True)
@@ -234,10 +234,10 @@ class DummyReq(Requirement):
     def last_update(self):
         return 0.0
 
-    def run(self, print_recipe=True, **kwargs):
-        if print_recipe:
-            print("Nothing left to do for header '{trgt}'"
-                  .format(trgt=self.target))
+    def run(self, verbose=1, **kwargs):
+        if verbose >= 1:
+            print_recipe("Nothing left to do for header '{trgt}'"
+                         .format(trgt=self.target))
 
 
 def build_dep_graph(trgt, rules, required_by=None):
