@@ -24,6 +24,30 @@ def print_recipe(string, **kwargs):
     cprint(string, color='blue', attrs=['bold'], **kwargs)
 
 
+def _backup_name(path):
+    return "." + path + "~pymake_backup"
+
+
+def _try_backup(path):
+    try:
+        os.rename(path, _backup_name(path))
+    except FileNotFoundError:
+        return False
+    else:
+        return True
+
+def _try_recover(path, or_remove=False):
+    try:
+        os.rename(_backup_name(path), path)
+    except FileNotFoundError:
+        if or_remove:
+            os.remove(path)
+        return False
+    else:
+        return True
+
+
+
 class Rule():
     """A task construction and dependency rule.
 
@@ -193,7 +217,6 @@ class TaskReq(Requirement):
         super(TaskReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
         self.recipe = recipe
-        self._has_run = False  # This is just a defensive move.
 
     def __repr__(self):
         return ("{self.__class__.__name__}(trgt={self.target!r}, "
@@ -218,12 +241,15 @@ class TaskReq(Requirement):
 
     def run(self, verbose=1, execute=True, **kwargs):
         """Run the task to create the target."""
-        assert not self._has_run  # Defensive...
         if verbose >= 1:
             print_recipe(self.recipe, file=sys.stderr)
         if execute:
-            subprocess.check_call(self.recipe, shell=True)
-        self._has_run = True
+            _try_backup(self.target)
+            try:
+                subprocess.check_call(self.recipe, shell=True)
+            except Exception as err:
+                _try_recover(self.target, or_remove=True)
+                raise err
 
 
 class DummyReq(Requirement):
