@@ -46,6 +46,12 @@ def _try_recover(path, or_remove=False):
     else:
         return True
 
+def _try_rmv_backup(path):
+    try:
+        os.remove(_backup_name(path))
+    except FileNotFoundError:
+        pass
+
 
 
 class Rule():
@@ -250,6 +256,7 @@ class TaskReq(Requirement):
             except Exception as err:
                 _try_recover(self.target, or_remove=True)
                 raise err
+            _try_rmv_backup(self.target)
 
 
 class DummyReq(Requirement):
