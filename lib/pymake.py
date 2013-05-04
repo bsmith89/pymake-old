@@ -266,7 +266,7 @@ def build_dep_graph(trgt, rules):
     if trgt_rule is None:
         if os.path.exists(trgt):
             requirement = FileReq(trgt)
-            return {requirement}, {requirement: set()}
+            return requirement, {requirement: set()}
         else:
             raise ValueError(("No rule defined for {trgt!r}, the required "
                               "file doesn't exist, or there is a "
