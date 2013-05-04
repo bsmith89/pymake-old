@@ -1,7 +1,8 @@
 #! /usr/bin/env python
 """An example pymake script"""
 
-from pymake import *  # Simple one line import statetment.
+# Simple one line import statetment.
+from pymake import Rule, visualize_graph, make
 import sys
 
 EXT = 'test'

@@ -19,6 +19,7 @@ import itertools
 from threading import Thread
 from collections import defaultdict
 from termcolor import cprint
+from math import isnan
 
 
 def print_recipe(string, **kwargs):
@@ -164,6 +165,9 @@ class Requirement():
         considered up to date, so if you want all tasks which depend on
         the given task to run, this function should return a larger value.
 
+        float('nan') should be returned when the time of last update cannot
+        be determined.
+
         """
         raise NotImplementedError("The base Requirement class has not "
                                   "implemented last_update, but it *should* "
@@ -181,7 +185,7 @@ class FileReq(Requirement):
         if os.path.exists(self.target):
             return os.path.getmtime(self.target)
         else:
-            return 0.0
+            return float('nan')
 
 
 class TaskReq(Requirement):
@@ -212,7 +216,7 @@ class TaskReq(Requirement):
         if os.path.exists(self.target):
             return os.path.getmtime(self.target)
         else:
-            return 0.0
+            return float('nan')
 
     def run(self, verbose=1, execute=True, **kwargs):
         """Run the task to create the target."""
@@ -232,15 +236,15 @@ class DummyReq(Requirement):
         self.prerequisites = preqs
 
     def last_update(self):
-        return 0.0
+        return float('nan')
 
     def run(self, verbose=1, **kwargs):
         if verbose >= 1:
-            print_recipe("Nothing left to do for header '{trgt}'"
+            print_recipe("Nothing left to do for dummy-requirement '{trgt}'"
                          .format(trgt=self.target))
 
 
-def build_dep_graph(trgt, rules, required_by=None):
+def build_dep_graph(trgt, rules):
     """Return a dependency graph.
 
     A dependency graph is a direction network linking tasks to their
@@ -255,15 +259,8 @@ def build_dep_graph(trgt, rules, required_by=None):
 
     Operates recursively.
 
-    TODO: Is the "required_by" kwarg really necessary?
-
     """
     rules = list(rules)
-    trgt = trgt.strip()
-    if trgt is None:
-        return None
-    if trgt is "":
-        return None
     trgt_rule = None
     for i, rule in enumerate(rules):
         if rule.applies(trgt):
@@ -272,52 +269,36 @@ def build_dep_graph(trgt, rules, required_by=None):
     if trgt_rule is None:
         if os.path.exists(trgt):
             requirement = FileReq(trgt)
-            return {required_by: set([requirement]), requirement: set()}
+            return {requirement}, {requirement: set()}
         else:
-            raise ValueError(("No rule defined for {trgt!r}, or there is a "
+            raise ValueError(("No rule defined for {trgt!r}, the required "
+                              "file doesn't exist, or there is a "
                               "cycle in the dependency graph.")
                              .format(trgt=trgt))
-    task = trgt_rule.make_task(trgt)
-    preqs = task.prerequisites
-    preq_graphs = [build_dep_graph(preq_trgt, rules, task)
-                   for preq_trgt in preqs]
-    union = defaultdict(set)
-    union[task]  # Initialize a set of pre-reqs for task
-    union[required_by] = set([task])
-    for graph in preq_graphs:
-        for requirement in graph:
-            union[requirement] = union[requirement] | graph[requirement]
-    return dict(union)
-
-
-def pop_dep_graph_root(graph):
-    """Return the target of the dependency graph
-
-    As it is currently designed, *build_dep_graph* returns a dictionary
-    where the root requirement (the requirement associated with the *trgt*
-    argument) is the only member of a set with the key *None*.
-
-    As per the name "pop", this function removes and returns that root
-    requirement.
-
-    TODO: Build the software so this silly, breakable function isn't
-          necessary.
-
-    """
-    return graph.pop(None).pop()
+    trgt_task = trgt_rule.make_task(trgt)
+    preq_trgts = trgt_task.prerequisites
+    preq_tasks = set()
+    trgt_graph = {}
+    for preq_trgt in preq_trgts:
+        preq_task, preq_graph = build_dep_graph(preq_trgt, rules)
+        preq_tasks.add(preq_task)
+        trgt_graph = dict(list(trgt_graph.items()) + list(preq_graph.items()))
+    trgt_graph[trgt_task] = preq_tasks
+    return trgt_task, trgt_graph
 
 
 def merge_orders(*iters):
-    """Yield sets, where equal items are only returned once.
+    """Yield merged sets from *iters*.
 
     Takes any number of iterators of sets and merges sets from the front.
+    Where any given entry in a set only occurs once.
 
     This function is meant to deal with the semi-ordered (i.e. ordered,
     but with multiple equivilant entries) lists of requirements
     which must be merged together.
 
     """
-    returned_set = {None}  # So that None will never be returned
+    returned_set = set()
     for priority_orders in itertools.zip_longest(*iters, fillvalue=set()):
         priority_set = set.union(*priority_orders)
         priority_set -= returned_set
@@ -330,16 +311,15 @@ def build_orders(req, graph):
     """Return a list of requirements in priority order.
 
     Given a dependency graph and a root requirement, returns a list
-    of sets.  The items in every set only depend on items further down the
-    order list.
+    of sets.  The requirements in every set only depend on requirements
+    further down the orders list.
 
     Operates recursively.
 
     """
-    last_graph_update = 0.0
     last_req_update = req.last_update()
     if (req not in graph) or (len(graph[req]) == 0):
-        try:  # Duck typing
+        try:  # Duck typing: does it have a run method?
             req.run
         except AttributeError:
             return [set()], last_req_update
@@ -353,10 +333,15 @@ def build_orders(req, graph):
         preq_update_times.append(update_time)
     last_graph_update = max(preq_update_times)
     preq_orders_list = list(merge_orders(*preq_orders_lists))
-    if last_graph_update >= last_req_update:
-        return [{req}] + preq_orders_list, last_graph_update
-    else:
+    # Remember that last_graph_update is *nan* if _any_ prereq is nan.
+    # last_req_update is nan if the target file does not currently exist.
+    # Therefore, a set of orders will be returned when either of these
+    # possibilities occurs (plus the canonical case, when any precursor
+    # was updated more recently than the focal requirement.)
+    if last_graph_update <= last_req_update:
         return [set()], last_req_update
+    else:
+        return [{req}] + preq_orders_list, last_graph_update
 
 
 def run_orders(orders, parallel=False, **kwargs):
@@ -381,8 +366,7 @@ def run_orders(orders, parallel=False, **kwargs):
 
 def make(trgt, rules, **kwargs):
     """Construct the dependency graph and run it."""
-    graph = build_dep_graph(trgt, rules)
-    root = pop_dep_graph_root(graph)
+    root, graph = build_dep_graph(trgt, rules)
     orders, newest_order_update = build_orders(root, graph)
     run_orders(orders, **kwargs)
 
@@ -398,18 +382,17 @@ def visualize_graph(trgt, rules, outpath=None):
         import __main__
         outpath = ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
     import pydot
-    graph = build_dep_graph(trgt, rules)
-    root = pop_dep_graph_root(graph)
+    root, graph = build_dep_graph(trgt, rules)
     orders, newester_order_update = build_orders(root, graph)
     dot = pydot.Dot(graph_name="Dependency", graph_type='digraph',
-                    labelloc='r', rankdir="RL")
+                    labelloc='r', rankdir="BT")
     dot.set_node_defaults(shape='ellipse', fontsize=24)
     for req in graph:
         for preq in graph[req]:
-            dot.add_edge(pydot.Edge(req.target, preq.target))
-    for rank, rank_reqs in enumerate(orders, 1):
+            dot.add_edge(pydot.Edge(preq.target, req.target))
+    for rank, rank_reqs in enumerate(reversed(orders), 1):
         rank_plate = pydot.Cluster(graph_name=str(rank),
-                                   label="Parallel Set {r}".format(r=rank))
+                                   label="Order set {r}".format(r=rank))
         for req in rank_reqs:
             rank_plate.add_node(pydot.Node(req.target))
         dot.add_subgraph(rank_plate)
