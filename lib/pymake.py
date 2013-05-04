@@ -17,9 +17,7 @@ import os
 import sys
 import itertools
 from threading import Thread
-from collections import defaultdict
 from termcolor import cprint
-from math import isnan
 
 
 def print_recipe(string, **kwargs):
@@ -245,7 +243,7 @@ class DummyReq(Requirement):
 
 
 def build_dep_graph(trgt, rules):
-    """Return a dependency graph.
+    """Return the root and a dependency graph.
 
     A dependency graph is a direction network linking tasks to their
     pre-requisites.
@@ -254,8 +252,7 @@ def build_dep_graph(trgt, rules):
     objects.  Each requirement points to it's pre-requisites, which
     themselves point to their own pre-requisites, etc.
 
-    The returned graph is guarenteed to be acyclic, and the root of the graph
-    has the key *None*.
+    The returned graph is guarenteed to be acyclic.
 
     Operates recursively.
 
@@ -293,9 +290,9 @@ def merge_orders(*iters):
     Takes any number of iterators of sets and merges sets from the front.
     Where any given entry in a set only occurs once.
 
-    This function is meant to deal with the semi-ordered (i.e. ordered,
-    but with multiple equivilant entries) lists of requirements
-    which must be merged together.
+    This function is meant to deal with the semi-ordered (i.e. priority
+    ordered, but with ties) lists of requirements which must be merged
+    together.
 
     """
     returned_set = set()
