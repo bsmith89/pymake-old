@@ -18,11 +18,14 @@ import sys
 import itertools
 from threading import Thread
 from termcolor import cprint
+from math import isnan
 
 
 def print_recipe(string, **kwargs):
     cprint(string, color='blue', attrs=['bold'], **kwargs)
 
+
+# TODO: Turn the backup functions into a contextmanager.
 
 def _backup_name(path):
     return "." + path + "~pymake_backup"
@@ -349,11 +352,11 @@ def build_orders(req, graph):
     """
     last_req_update = req.last_update()
     if (req not in graph) or (len(graph[req]) == 0):
-        try:  # Duck typing: does it have a run method?
-            req.run
-        except AttributeError:
+        if not hasattr(req, 'run'):
             return [set()], last_req_update
-        else:
+        elif not isnan(last_req_update):  # The target already exists:
+            return [set()], last_req_update
+        else:  # The target does not exist and the task is runnable:
             return [{req}], last_req_update
     preq_update_times = []
     preq_orders_lists = []
