@@ -209,10 +209,10 @@ class Requirement():
 
 
 class FileReq(Requirement):
-    """A Requirement subclass used for files"""
+    """A Requirement with a target that is a file."""
 
-    def __init__(self, trgt_path):
-        super(FileReq, self).__init__(trgt=trgt_path)
+    def __init__(self, trgt):
+        super(FileReq, self).__init__(trgt=trgt)
 
     def last_update(self):
         if os.path.exists(self.target):
@@ -221,8 +221,8 @@ class FileReq(Requirement):
             return float('nan')
 
 
-class TaskReq(Requirement):
-    """A requirement which defines how to make the target."""
+class TaskReq(FileReq):
+    """A requirement which defines how to make the target file."""
 
     def __init__(self, trgt, preqs, recipe, order_only=False):
         super(TaskReq, self).__init__(trgt=trgt)
@@ -246,16 +246,13 @@ class TaskReq(Requirement):
         return self.recipe == other.recipe
 
     def last_update(self):
-        if os.path.exists(self.target):
-            if self.order_only:
-                # If it exists, those for which it is a pre-requisite
-                # (either directly or indirectly) should not be considered
-                # out of date, regardless of updates to this file.
-                return 0.0
-            else:
-                return os.path.getmtime(self.target)
+        if self.order_only and os.path.exists(self.target):
+            # If it exists, those for which it is a pre-requisite
+            # (either directly or indirectly) should not be considered
+            # out of date, regardless of updates to this file.
+            return 0.0
         else:
-            return float('nan')
+            return super(TaskReq, self).last_update()
 
     def run(self, verbose=1, execute=True, **kwargs):
         """Run the task to create the target."""
@@ -274,8 +271,8 @@ class TaskReq(Requirement):
 class DummyReq(Requirement):
     """A requirement which only points to other requirements."""
 
-    def __init__(self, name, preqs):
-        super(DummyReq, self).__init__(trgt=name)
+    def __init__(self, trgt, preqs):
+        super(DummyReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
 
     def last_update(self):
