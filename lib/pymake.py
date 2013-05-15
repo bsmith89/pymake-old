@@ -71,11 +71,13 @@ class Rule():
 
     """
 
-    def __init__(self, trgt, preqs=[], recipe=None, **env):
+    def __init__(self, trgt, preqs=[], recipe=None,
+                 order_only=False, **env):
         self.env = env
         self.target_template = trgt
         self.prerequisite_templates = [template.strip() for template in preqs]
         self.recipe_template = recipe
+        self.order_only = order_only
 
     def __repr__(self):
         return ("Rule(trgt={self.target_template!r}, "
@@ -153,7 +155,7 @@ class Rule():
             return DummyReq(trgt, self._make_preqs(trgt))
         else:
             return TaskReq(trgt, self._make_preqs(trgt),
-                           self._make_recipe(trgt))
+                           self._make_recipe(trgt), self.order_only)
 
     def make_req(self, trgt):
         self.make_task(self, trgt)
@@ -222,10 +224,11 @@ class FileReq(Requirement):
 class TaskReq(Requirement):
     """A requirement which defines how to make the target."""
 
-    def __init__(self, trgt, preqs, recipe):
+    def __init__(self, trgt, preqs, recipe, order_only=False):
         super(TaskReq, self).__init__(trgt=trgt)
         self.prerequisites = preqs
         self.recipe = recipe
+        self.order_only = order_only
 
     def __repr__(self):
         return ("{self.__class__.__name__}(trgt={self.target!r}, "
@@ -244,7 +247,13 @@ class TaskReq(Requirement):
 
     def last_update(self):
         if os.path.exists(self.target):
-            return os.path.getmtime(self.target)
+            if self.order_only:
+                # If it exists, those for which it is a pre-requisite
+                # (either directly or indirectly) should not be considered
+                # out of date, regardless of updates to this file.
+                return 0.0
+            else:
+                return os.path.getmtime(self.target)
         else:
             return float('nan')
 
