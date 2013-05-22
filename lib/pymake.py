@@ -16,6 +16,7 @@ import re
 import os
 import sys
 import itertools
+import optparse
 from threading import Thread
 from termcolor import cprint
 from math import isnan
@@ -44,7 +45,10 @@ def _try_recover(path, or_remove=False):
         os.rename(_backup_name(path), path)
     except FileNotFoundError:
         if or_remove:
-            os.remove(path)
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
         return False
     else:
         return True
@@ -90,6 +94,9 @@ class Rule():
     def __str__(self):
         return ("{self.target_template} : {self.prerequisite_templates}\n"
                 "{self.recipe_template}").format(self=self)
+
+    def get_target(self):
+        return self.target_template
 
     def _get_target_pattern(self):
         """Return the target pattern.
@@ -412,6 +419,11 @@ def make(trgt, rules, **kwargs):
     run_orders(orders, **kwargs)
 
 
+def get_default_fig_outpath():
+    import __main__
+    return ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
+
+
 def visualize_graph(trgt, rules, outpath=None):
     """Draw a figure representing the dependency graph.
 
@@ -420,8 +432,7 @@ def visualize_graph(trgt, rules, outpath=None):
 
     """
     if outpath is None:
-        import __main__
-        outpath = ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
+        outpath = get_default_fig_outpath()
     import pydot
     root, graph = build_dep_graph(trgt, rules)
     orders, newester_order_update = build_orders(root, graph)
@@ -438,3 +449,43 @@ def visualize_graph(trgt, rules, outpath=None):
             rank_plate.add_node(pydot.Node(req.target))
         dot.add_subgraph(rank_plate)
     return dot.write_png(outpath)
+
+
+def maker(rules):
+    usage = "usage: %prog [options] [TARGET]"
+    parser = optparse.OptionParser(usage=usage)
+    parser.add_option("-q", "--quiet", action="store_const",
+                      const=0, dest="verbose",
+                      help=("don't print recipes. "
+                            "DEFAULT: print recipes"))
+    parser.add_option("-v", "--verbose", action="count",
+                      dest="verbose", default=1,
+                      help=("print recipes. "
+                            "Increment the verbosity counter by 1. "
+                            "DEFAULT: verbosity level 1."))
+    parser.add_option("-n", "--dry", action="store_false",
+                      dest="execute", default=True,
+                      help=("Dry run.  Don't execute the recipes. "
+                            "DEFAULT: execute recipes"))
+    parser.add_option("--figure", dest="fig_outpath",
+                      help=("Visualize the graph."))
+    parser.add_option("-p", "--parallel", action="store_true",
+                      dest="parallel", default=True,
+                      help=("execute the recipes in parallel processes. "
+                            "DEFAULT: parallel"))
+    parser.add_option("-s", "--series", "--not-parallel",
+                      action="store_false", dest="parallel", default=True,
+                      help=("execute the recipes in series. "
+                            "DEFAULT: parallel"))
+    opts, args = parser.parse_args()
+
+    if len(args) > 0:
+        target = args[0]
+    elif len(args) == 0:
+        target = rules[0].get_target()
+    else:
+        ValueError("Wrong number of positional arguments passed to pymake.")
+    if opts.fig_outpath:
+        visualize_graph(target, rules, opts.fig_outpath)
+    make(target, rules, verbose=opts.verbose,
+         execute=opts.execute, parallel=opts.parallel)

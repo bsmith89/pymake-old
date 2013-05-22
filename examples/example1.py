@@ -1,5 +1,5 @@
 import sys
-from pymake import Rule, visualize_graph, make
+from pymake import Rule, visualize_graph, make, maker
 from time import sleep
 
 EXT = "test"
@@ -22,13 +22,7 @@ rules = [Rule("all", preqs=["branch1", "branch2"]),
                       "sleep 1"),
               EXT=EXT),
          Rule(".*/", recipe="mkdir {trgt} \nsleep 1", order_only=True),
-         Rule("clean", recipe="rm -r branch*/ example1.png")]
+         Rule("clean", recipe="rm -r branch*/")]
 
 if __name__ == '__main__':
-    try:
-        target = sys.argv[1]
-    except IndexError:
-        target = "all"
-    visualize_graph(target, rules)
-    make(target, rules, parallel=True)
-
+    maker(rules)

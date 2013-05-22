@@ -2,7 +2,7 @@
 """An example pymake script"""
 
 # Simple one line import statetment.
-from pymake import Rule, visualize_graph, make
+from pymake import Rule, visualize_graph, make, maker
 import sys
 
 EXT = 'test'
@@ -38,18 +38,13 @@ rules = [Rule("all", preqs=["top"]),
                       "touch {trgt}\n"
                       "sleep 1"),
               EXT=EXT),
-         Rule(trgt="clean", recipe="rm *.{EXT} example0.png", EXT=EXT)]
+         Rule(trgt="clean", recipe="rm *.{EXT}", EXT=EXT)]
 
 # Make just requires a list of sequence or iterator of rules
 # And takes arbitrary targets and environmental variables
 # are available to recipes.
 
 if __name__ == '__main__':
-    try:
-        target = sys.argv[1]
-    except IndexError:
-        target = "all"
-    visualize_graph(target, rules)
-    make(target, rules, parallel=True)
+    maker(rules)
 
 # Environmental variables can not be set in recipes.
