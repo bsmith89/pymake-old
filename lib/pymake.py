@@ -77,6 +77,8 @@ class Rule():
         self.target_template = trgt
         self.prerequisite_templates = [template.strip() for template in preqs]
         self.recipe_template = recipe
+        if self.recipe_template == '':
+            self.recipe_template = None
         self.order_only = order_only
 
     def __repr__(self):
