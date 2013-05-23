@@ -25,7 +25,7 @@ rules = [Rule("all", preqs=["top"]),
               # \'s or use raw strings.) and groups found in the target
               # can be substituted in the pre-reqs and the recipe.
          Rule(trgt=r"second(.*).{EXT}",
-              preqs=("first{1}-1.{EXT}", r"first{1}-2.{EXT}"),
+              preqs=("first{0}-1.{EXT}", r"first{0}-2.{EXT}"),
               # Various keywords are available to the recipes.
               recipe=("echo {preqs}\n"
                       "echo {trgt}\n"
@@ -34,7 +34,7 @@ rules = [Rule("all", preqs=["top"]),
               EXT=EXT),
          Rule(trgt=r"first([0-9])-([0-9]).{EXT}",
               # Groups from the regex can also be used in the recipe.
-              recipe=("echo {1} {2}\n"
+              recipe=("echo {0} {1}\n"
                       "touch {trgt}\n"
                       "sleep 1"),
               EXT=EXT),

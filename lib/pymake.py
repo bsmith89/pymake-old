@@ -136,7 +136,7 @@ class Rule():
 
         """
         groups = self._make_target_groups(trgt)
-        prerequisites = [template.format(None, *groups, trgt=trgt, **self.env)
+        prerequisites = [template.format(*groups, trgt=trgt, **self.env)
                          for template in self.prerequisite_templates]
         return prerequisites
 
@@ -152,7 +152,7 @@ class Rule():
         groups = self._make_target_groups(trgt)
         preqs = self._make_preqs(trgt)
         all_preqs = " ".join(preqs)
-        return self.recipe_template.format(None, *groups, trgt=trgt,
+        return self.recipe_template.format(*groups, trgt=trgt,
                                            preqs=preqs, all_preqs=all_preqs,
                                            **self.env)
 
