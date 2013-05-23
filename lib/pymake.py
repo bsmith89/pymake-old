@@ -147,8 +147,7 @@ class Rule():
         pattern to the *trgt* string.
 
         """
-        if self.recipe_template is None:
-            return None
+        assert self.recipe_template is not None
         groups = self._make_target_groups(trgt)
         preqs = self._make_preqs(trgt)
         all_preqs = " ".join(preqs)
