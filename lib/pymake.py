@@ -17,7 +17,7 @@ import os
 import sys
 import itertools
 import optparse
-from threading import Thread
+from threading import Thread, Event
 from termcolor import cprint
 from math import isnan
 
@@ -262,7 +262,7 @@ class TaskReq(FileReq):
         else:
             return super(TaskReq, self).last_update()
 
-    def run(self, verbose=1, execute=True, **kwargs):
+    def run(self, verbose=1, execute=True, exc_event=None, **kwargs):
         """Run the task to create the target."""
         if verbose >= 1:
             print_recipe(self.recipe, file=sys.stderr)
@@ -270,8 +270,9 @@ class TaskReq(FileReq):
             _try_backup(self.target)
             try:
                 subprocess.check_call(self.recipe, shell=True)
-            except Exception as err:
+            except subprocess.CalledProcessError as err:
                 _try_recover(self.target, or_remove=True)
+                exc_event.set()
                 raise err
             _try_rmv_backup(self.target)
 
@@ -397,6 +398,7 @@ def run_orders(orders, parallel=False, **kwargs):
     If *parallel* == True, a requirement set is run in parallel.
 
     """
+    kwargs['exc_event'] = exc_event = Event()
     for order_set in reversed(orders):
         threads = [Thread(target=task.run, kwargs=kwargs)
                    for task in order_set]
@@ -409,6 +411,9 @@ def run_orders(orders, parallel=False, **kwargs):
             for thread in threads:
                 thread.start()
                 thread.join()
+        if exc_event.is_set():
+            raise Exception("At least one order failed in this set.  No more "
+                            "orders will be excecuted.")
 
 
 def make(trgt, rules, **kwargs):
@@ -488,3 +493,4 @@ def maker(rules):
         visualize_graph(target, rules, opts.fig_outpath)
     make(target, rules, verbose=opts.verbose,
          execute=opts.execute, parallel=opts.parallel)
+    # TODO: Take a parser option with additional environmental variables.
