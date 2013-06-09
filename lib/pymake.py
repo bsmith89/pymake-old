@@ -95,6 +95,12 @@ class Rule():
         return ("{self.target_template} : {self.prerequisite_templates}\n"
                 "{self.recipe_template}").format(self=self)
 
+    def set_env(self, env):
+        self.env = env
+
+    def update_env(self, env_update):
+        self.set_env(dict(list(self.env.items()) + list(env_update.items())))
+
     def get_target(self):
         return self.target_template
 
@@ -416,8 +422,10 @@ def run_orders(orders, parallel=False, **kwargs):
                             "orders will be excecuted.")
 
 
-def make(trgt, rules, **kwargs):
+def make(trgt, rules, env={}, **kwargs):
     """Construct the dependency graph and run it."""
+    for rule in rules:
+        rule.update_env(env)
     root, graph = build_dep_graph(trgt, rules)
     orders, newest_order_update = build_orders(root, graph)
     run_orders(orders, **kwargs)
@@ -481,16 +489,26 @@ def maker(rules):
                       action="store_false", dest="parallel", default=True,
                       help=("execute the recipes in series. "
                             "DEFAULT: parallel"))
+    parser.add_option("-V", "--var", "--additional-var", dest="env_items",
+                      default=[], action="append",
+                      nargs=2, metavar="[KEY] [VALUE]",
+                      help=("add the desired variable to the environment. "
+                            "Additional variables can be passed with "
+                            "more '-V' flags. Variables passed in this "
+                            "fasion override variables defined in any other "
+                            "way"))
     opts, args = parser.parse_args()
 
     if len(args) > 0:
         target = args[0]
     elif len(args) == 0:
+        # If no target specified, use the first target.  This will not take into account
+        # environmental variables passed with the '-V' flag.
         target = rules[0].get_target()
     else:
         ValueError("Wrong number of positional arguments passed to pymake.")
     if opts.fig_outpath:
         visualize_graph(target, rules, opts.fig_outpath)
-    make(target, rules, verbose=opts.verbose,
+    make(target, rules, env=dict(opts.env_items), verbose=opts.verbose,
          execute=opts.execute, parallel=opts.parallel)
     # TODO: Take a parser option with additional environmental variables.
