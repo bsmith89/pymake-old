@@ -17,6 +17,7 @@ import os
 import sys
 import itertools
 import optparse
+import logging
 from threading import Thread, Event
 from termcolor import cprint
 from math import isnan
@@ -33,21 +34,36 @@ def _backup_name(path):
 
 
 def _try_backup(path):
+    logging.debug("attempting to backup '{path}' if it exists".format(path=path))
+    backup_path = _backup_name(path)
     try:
-        os.rename(path, _backup_name(path))
+        os.rename(path, backup_path)
     except FileNotFoundError:
+        logging.debug("'{path}' not found in order to be backed up".format(path=path))
         return False
     else:
+        logging.debug("'{path}' backed up to '{backup_path}'"\
+                          .format(path=path, backup_path=backup_path))
         return True
 
 def _try_recover(path, or_remove=False):
+    backup_path = _backup_name(path)
+    logging.debug("attempting to recover '{path}' from '{backup_path}'".\
+                      format(path=path, backup_path=backup_path))
     try:
-        os.rename(_backup_name(path), path)
+        os.rename(backup_path, path)
     except FileNotFoundError:
+        logging.debug("'{backup_path}' not found and therefore not recovered".\
+                          format(backup_path=backup_path))
         if or_remove:
             try:
                 os.remove(path)
             except FileNotFoundError:
+                logging.debug("'{path}' not found".format(path=path))
+                pass
+            else:
+                logging.debug(("'{path}' removed since recovery of backup "
+                               "could not be completed.").format(path=path))
                 pass
         return False
     else:
@@ -92,8 +108,9 @@ class Rule():
                 "**{self.env!r})").format(self=self)
 
     def __str__(self):
-        return ("{self.target_template} : {self.prerequisite_templates}\n"
-                "{self.recipe_template}").format(self=self)
+        return self.target_template
+#        return ("{self.target_template} : {self.prerequisite_templates}\n"
+#                "{self.recipe_template}").format(self=self)
 
     def set_env(self, env):
         self.env = env
@@ -250,7 +267,7 @@ class TaskReq(FileReq):
                 "recipe={self.recipe!r})").format(self=self)
 
     def __str__(self):
-        return self.recipe
+        return self.target
 
     def __hash__(self):
         return hash(self.recipe)
@@ -270,9 +287,12 @@ class TaskReq(FileReq):
 
     def run(self, verbose=1, execute=True, exc_event=None, **kwargs):
         """Run the task to create the target."""
-        if verbose >= 1:
-            print_recipe(self.recipe, file=sys.stderr)
+        logging.debug("running task for {self.target}".format(self=self))
+        logging.info("\n{self.recipe}".format(self=self))
+#        if verbose >= 1:
+#            print_recipe(self.recipe, file=sys.stderr)
         if execute:
+            logging.debug("executing {self.target}".format(self=self))
             _try_backup(self.target)
             try:
                 subprocess.check_call(self.recipe, shell=True)
@@ -294,9 +314,11 @@ class DummyReq(Requirement):
         return float('nan')
 
     def run(self, verbose=1, **kwargs):
-        if verbose >= 1:
-            print_recipe("Nothing left to do for dummy-requirement '{trgt}'"
-                         .format(trgt=self.target))
+        logging.info(("\nDummyReq '{self.target}' running, which usually "
+                      "indicates that all sub-tasks are completed.").format(self=self))
+#        if verbose >= 1:
+#            print_recipe("Nothing left to do for dummy-requirement '{trgt}'"
+#                         .format(trgt=self.target))
 
 
 def build_dep_graph(trgt, rules):
@@ -314,14 +336,19 @@ def build_dep_graph(trgt, rules):
     Operates recursively.
 
     """
+    logging.debug("entered build_dep_graph for '{trgt}'".format(trgt=trgt))
     rules = list(rules)
     trgt_rule = None
     for i, rule in enumerate(rules):
         if rule.applies(trgt):
             trgt_rule = rules.pop(i)
+            logging.debug("'{trgt_rule!s}' applies to {trgt}".\
+                              format(trgt_rule=trgt_rule, trgt=trgt))
             break
     if trgt_rule is None:
+        logging.debug("no rule found which applies to {trgt}".format(trgt=trgt))
         if os.path.exists(trgt):
+            logging.debug("'{trgt}' exists".format(trgt=trgt))
             requirement = FileReq(trgt)
             return requirement, {requirement: set()}
         else:
@@ -373,11 +400,17 @@ def build_orders(req, graph):
     """
     last_req_update = req.last_update()
     if (req not in graph) or (len(graph[req]) == 0):
+        logging.debug("'{req!s}' is a leaf requirement".format(req=req))
         if not hasattr(req, 'run'):
+            logging.debug("'{req!s}' is not runnable".format(req=req))
             return [set()], last_req_update
         elif not isnan(last_req_update):  # The target already exists:
+            logging.debug("'{req!s}' last updated at {last_update}".\
+                              format(req=req, last_update=last_req_update))
             return [set()], last_req_update
         else:  # The target does not exist and the task is runnable:
+            logging.debug(("'{req!s}' does not exist; the task to create "
+                           "it has been added to the build orders").format(req=req))
             return [{req}], last_req_update
     preq_update_times = []
     preq_orders_lists = []
@@ -386,15 +419,20 @@ def build_orders(req, graph):
         preq_orders_lists.append(orders_list)
         preq_update_times.append(update_time)
     last_graph_update = max(preq_update_times)
+    logging.debug(("the most recent update of a pre-requisite for "
+                   "'{req!s}' was at {last_update}").\
+                       format(req=req, last_update=last_graph_update))
     preq_orders_list = list(merge_orders(*preq_orders_lists))
     # Remember that last_graph_update is *nan* if _any_ prereq is nan.
     # last_req_update is nan if the target file does not currently exist.
     # Therefore, a set of orders will be returned when either of these
     # possibilities occurs (plus the canonical case, when any precursor
     # was updated more recently than the focal requirement.)
-    if last_graph_update <= last_req_update:
+    if last_graph_update < last_req_update:
+        logging.debug("'{req!s}' is up-to-date".format(req=req))
         return [set()], last_req_update
     else:
+        logging.debug("'{req!s}' is not up-to-date and will be updated.".format(req=req))
         return [{req}] + preq_orders_list, last_graph_update
 
 
@@ -473,8 +511,8 @@ def maker(rules):
     parser.add_option("-v", "--verbose", action="count",
                       dest="verbose", default=1,
                       help=("print recipes. "
-                            "Increment the verbosity counter by 1. "
-                            "DEFAULT: verbosity level 1."))
+                            "Increment the logging level by 1. "
+                            "DEFAULT: verbosity level 1 ('INFO')"))
     parser.add_option("-n", "--dry", action="store_false",
                       dest="execute", default=True,
                       help=("Dry run.  Don't execute the recipes. "
@@ -498,6 +536,8 @@ def maker(rules):
                             "fasion override variables defined in any other "
                             "way"))
     opts, args = parser.parse_args()
+
+    logging.basicConfig(level=[logging.ERROR, logging.INFO, logging.DEBUG][opts.verbose])
 
     if len(args) > 0:
         target = args[0]
