@@ -18,63 +18,64 @@ import sys
 import itertools
 import optparse
 import logging
+from contextlib import contextmanager
 from threading import Thread, Event
 from termcolor import cprint
 from math import isnan
 
 
-def print_recipe(string, **kwargs):
-    cprint(string, color='blue', attrs=['bold'], **kwargs)
+@contextmanager
+def backup_existing_while(path, extension="~", prepend="", else_on_fail=None):
+    """A context manager to backup a file during an action, then remove it.
 
+    File at *path*, if it exists, is moved to the backup location
+    defined by *prepend* + path + *extension*.  When the context manager
+    is closed without error, the backup is removed.
 
-# TODO: Turn the backup functions into a contextmanager.
+    If an error occurs while the file is backed up, whatever now exists at
+    *path* is replaced by the backup.
 
-def _backup_name(path):
-    return "." + path + "~pymake_backup"
+    If *path* did not exist, whatever now exists at *path* is served as an
+    argument to *else_on_fail*.
 
+    Takes one position argument:
+        *path*
+    Takes three keyword arguments:
+        *extension* (default: '~')
+        *prepend* (default: ''),
+        *else_on_fail* (default: None)
 
-def _try_backup(path):
-    logging.debug("attempting to backup '{path}' if it exists".format(path=path))
-    backup_path = _backup_name(path)
-    try:
+    """
+    backup_path = os.path.join(os.path.dirname(path),
+                               prepend + os.path.basename(path) + extension)
+    original_exists = os.path.exists(path)
+    if original_exists:
+        logging.debug("backing up the extant {path}".format(path=path))
         os.rename(path, backup_path)
-    except FileNotFoundError:
-        logging.debug("'{path}' not found in order to be backed up".format(path=path))
-        return False
-    else:
-        logging.debug("'{path}' backed up to '{backup_path}'"\
-                          .format(path=path, backup_path=backup_path))
-        return True
-
-def _try_recover(path, or_remove=False):
-    backup_path = _backup_name(path)
-    logging.debug("attempting to recover '{path}' from '{backup_path}'".\
-                      format(path=path, backup_path=backup_path))
     try:
-        os.rename(backup_path, path)
-    except FileNotFoundError:
-        logging.debug("'{backup_path}' not found and therefore not recovered".\
-                          format(backup_path=backup_path))
-        if or_remove:
-            try:
-                os.remove(path)
-            except FileNotFoundError:
-                logging.debug("'{path}' not found".format(path=path))
-                pass
-            else:
-                logging.debug(("'{path}' removed since recovery of backup "
-                               "could not be completed.").format(path=path))
-                pass
-        return False
+        yield
+    except Exception as err:
+        logging.debug("an error occured while {path} was backed up".\
+                      format(path=path))
+        new_exists = os.path.exists(path)
+        if original_exists:
+            logging.debug(("since {backup_path} exists, "
+                           "it will replace any new {path}").\
+                          format(path=path, backup_path=backup_path))
+            os.rename(backup_path, path)
+        elif new_exists and else_on_fail:
+            logging.debug(("since {backup_path} does not exist, "
+                           "{else_on_fail} will be called on {path}").\
+                          format(backup_path=backup_path,
+                                  else_on_fail=else_on_fail,
+                                  path=path))
+            else_on_fail(path)
     else:
-        return True
-
-def _try_rmv_backup(path):
-    try:
-        os.remove(_backup_name(path))
-    except FileNotFoundError:
-        pass
-
+        if original_exists:
+            logging.debug(("no error occurred while {path} was backed up. "
+                           "{backup_path} will be removed.").\
+                          format(path=path, backup_path=backup_path))
+            os.remove(backup_path)
 
 
 class Rule():
@@ -213,8 +214,6 @@ class Requirement():
 
     def __str__(self):
         return self.target
-        # For a Requirement object, self.target wholey determines
-        # identity.
 
     def __hash__(self):
         return hash(self.target)
@@ -289,18 +288,12 @@ class TaskReq(FileReq):
         """Run the task to create the target."""
         logging.debug("running task for {self.target}".format(self=self))
         logging.info("\n{self.recipe}".format(self=self))
-#        if verbose >= 1:
-#            print_recipe(self.recipe, file=sys.stderr)
         if execute:
-            logging.debug("executing {self.target}".format(self=self))
-            _try_backup(self.target)
-            try:
+            with backup_existing_while(self.target, prepend='.',
+                                       extension='~pymake_backup',
+                                       else_on_fail=os.remove):
+                logging.debug("executing {self.target}".format(self=self))
                 subprocess.check_call(self.recipe, shell=True)
-            except subprocess.CalledProcessError as err:
-                _try_recover(self.target, or_remove=True)
-                exc_event.set()
-                raise err
-            _try_rmv_backup(self.target)
 
 
 class DummyReq(Requirement):
@@ -315,10 +308,8 @@ class DummyReq(Requirement):
 
     def run(self, verbose=1, **kwargs):
         logging.info(("\nDummyReq '{self.target}' running, which usually "
-                      "indicates that all sub-tasks are completed.").format(self=self))
-#        if verbose >= 1:
-#            print_recipe("Nothing left to do for dummy-requirement '{trgt}'"
-#                         .format(trgt=self.target))
+                      "indicates that all sub-tasks are completed.").\
+                     format(self=self))
 
 
 def build_dep_graph(trgt, rules):
@@ -410,7 +401,8 @@ def build_orders(req, graph):
             return [set()], last_req_update
         else:  # The target does not exist and the task is runnable:
             logging.debug(("'{req!s}' does not exist; the task to create "
-                           "it has been added to the build orders").format(req=req))
+                           "it has been added to the build orders").\
+                          format(req=req))
             return [{req}], last_req_update
     preq_update_times = []
     preq_orders_lists = []
@@ -432,7 +424,8 @@ def build_orders(req, graph):
         logging.debug("'{req!s}' is up-to-date".format(req=req))
         return [set()], last_req_update
     else:
-        logging.debug("'{req!s}' is not up-to-date and will be updated.".format(req=req))
+        logging.debug("'{req!s}' is not up-to-date and will be updated.".\
+                      format(req=req))
         return [{req}] + preq_orders_list, last_graph_update
 
 
@@ -537,13 +530,15 @@ def maker(rules):
                             "way"))
     opts, args = parser.parse_args()
 
-    logging.basicConfig(level=[logging.ERROR, logging.INFO, logging.DEBUG][opts.verbose])
+    logging.basicConfig(level=[logging.ERROR,
+                               logging.INFO,
+                               logging.DEBUG][opts.verbose])
 
     if len(args) > 0:
         target = args[0]
     elif len(args) == 0:
-        # If no target specified, use the first target.  This will not take into account
-        # environmental variables passed with the '-V' flag.
+        # If no target specified, use the first target.  This will not take
+        # into account environmental variables passed with the '-V' flag.
         target = rules[0].get_target()
     else:
         ValueError("Wrong number of positional arguments passed to pymake.")
@@ -551,4 +546,3 @@ def maker(rules):
         visualize_graph(target, rules, opts.fig_outpath)
     make(target, rules, env=dict(opts.env_items), verbose=opts.verbose,
          execute=opts.execute, parallel=opts.parallel)
-    # TODO: Take a parser option with additional environmental variables.
