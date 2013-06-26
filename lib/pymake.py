@@ -2,7 +2,7 @@
 """A GNU Make replacement in python.
 
 A python scripe which import pymake, defines a list of rules and
-calls "make(rules, trgt)" is now a standalone makefile.
+calls "maker(rules, trgt)" is now a standalone makefile.
 
 Internally, rules are parsed into a dependency tree of "requirements",
 this is compressed into a hierarchical list of orders, and then the
@@ -462,20 +462,13 @@ def make(trgt, rules, env={}, **kwargs):
     run_orders(orders, **kwargs)
 
 
-def get_default_fig_outpath():
-    import __main__
-    return ".".join([os.path.splitext(__main__.__file__)[0], 'png'])
-
-
-def visualize_graph(trgt, rules, outpath=None):
+def visualize_graph(trgt, rules, outpath):
     """Draw a figure representing the dependency graph.
 
     By default writes the graph to a file named the same as the calling
     script.
 
     """
-    if outpath is None:
-        outpath = get_default_fig_outpath()
     import pydot
     root, graph = build_dep_graph(trgt, rules)
     orders, newester_order_update = build_orders(root, graph)
@@ -534,7 +527,7 @@ def maker(rules):
                                logging.INFO,
                                logging.DEBUG][opts.verbose])
 
-    if len(args) > 0:
+    if len(args) == 1:
         target = args[0]
     elif len(args) == 0:
         # If no target specified, use the first target.  This will not take
