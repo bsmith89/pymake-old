@@ -20,9 +20,10 @@ import optparse
 import logging
 from contextlib import contextmanager
 from threading import Thread, Event
-from termcolor import cprint
 from math import isnan
 
+
+LOG = logging.getLogger(__name__)
 
 @contextmanager
 def backup_existing_while(path, extension="~", prepend="", else_on_fail=None):
@@ -50,31 +51,31 @@ def backup_existing_while(path, extension="~", prepend="", else_on_fail=None):
                                prepend + os.path.basename(path) + extension)
     original_exists = os.path.exists(path)
     if original_exists:
-        logging.debug("backing up the extant {path}".format(path=path))
+        LOG.debug("backing up the extant {path}".format(path=path))
         os.rename(path, backup_path)
     try:
         yield
     except Exception as err:
-        logging.debug("an error occured while {path} was backed up".\
-                      format(path=path))
+        LOG.debug("an error occured while {path} was backed up".\
+                  format(path=path))
         new_exists = os.path.exists(path)
         if original_exists:
-            logging.debug(("since {backup_path} exists, "
-                           "it will replace any new {path}").\
-                          format(path=path, backup_path=backup_path))
+            LOG.debug(("since {backup_path} exists, "
+                       "it will replace any new {path}").\
+                      format(path=path, backup_path=backup_path))
             os.rename(backup_path, path)
         elif new_exists and else_on_fail:
-            logging.debug(("since {backup_path} does not exist, "
-                           "{else_on_fail} will be called on {path}").\
-                          format(backup_path=backup_path,
-                                  else_on_fail=else_on_fail,
-                                  path=path))
+            LOG.debug(("since {backup_path} does not exist, "
+                       "{else_on_fail} will be called on {path}").\
+                       format(backup_path=backup_path,
+                              else_on_fail=else_on_fail, path=path))
             else_on_fail(path)
+        raise err
     else:
         if original_exists:
-            logging.debug(("no error occurred while {path} was backed up. "
-                           "{backup_path} will be removed.").\
-                          format(path=path, backup_path=backup_path))
+            LOG.debug(("no error occurred while {path} was backed up. "
+                       "{backup_path} will be removed.").\
+                      format(path=path, backup_path=backup_path))
             os.remove(backup_path)
 
 
@@ -286,14 +287,29 @@ class TaskReq(FileReq):
 
     def run(self, verbose=1, execute=True, exc_event=None, **kwargs):
         """Run the task to create the target."""
-        logging.debug("running task for {self.target}".format(self=self))
-        logging.info("\n{self.recipe}".format(self=self))
+        LOG.debug("running task for '{self.target}'".format(self=self))
+        msg = "{self.recipe}".format(self=self)
+        for line in lines(msg):
+            LOG.info("in: " + line)
         if execute:
             with backup_existing_while(self.target, prepend='.',
                                        extension='~pymake_backup',
                                        else_on_fail=os.remove):
-                logging.debug("executing {self.target}".format(self=self))
-                subprocess.check_call(self.recipe, shell=True)
+                logging.debug("executing recipe for '{self.target}'".\
+                              format(self=self))
+                output = subprocess.check_output(self.recipe, shell=True)
+                for line in lines(output.decode()):
+                    LOG.info("out: " + line)
+
+
+def lines(string):
+    lines = string.split('\n')
+    if lines[0] == '':
+        del lines[0]
+    if lines and (lines[-1] == ''):
+        del lines[-1]
+    for line in lines:
+        yield line
 
 
 class DummyReq(Requirement):
@@ -307,9 +323,10 @@ class DummyReq(Requirement):
         return float('nan')
 
     def run(self, verbose=1, **kwargs):
-        logging.info(("\nDummyReq '{self.target}' running, which usually "
-                      "indicates that all sub-tasks are completed.").\
-                     format(self=self))
+        msg = ("DummyReq '{self.target}' running, which usually "
+               "indicates that all sub-tasks are completed.").\
+              format(self=self)
+        LOG.info(msg)
 
 
 def build_dep_graph(trgt, rules):
@@ -327,19 +344,19 @@ def build_dep_graph(trgt, rules):
     Operates recursively.
 
     """
-    logging.debug("entered build_dep_graph for '{trgt}'".format(trgt=trgt))
+    LOG.debug("entered build_dep_graph for '{trgt}'".format(trgt=trgt))
     rules = list(rules)
     trgt_rule = None
     for i, rule in enumerate(rules):
         if rule.applies(trgt):
             trgt_rule = rules.pop(i)
-            logging.debug("'{trgt_rule!s}' applies to {trgt}".\
-                              format(trgt_rule=trgt_rule, trgt=trgt))
+            LOG.debug("'{trgt_rule!s}' applies to '{trgt}'".\
+                      format(trgt_rule=trgt_rule, trgt=trgt))
             break
     if trgt_rule is None:
-        logging.debug("no rule found which applies to {trgt}".format(trgt=trgt))
+        LOG.debug("no rule found which applies to '{trgt}'".format(trgt=trgt))
         if os.path.exists(trgt):
-            logging.debug("'{trgt}' exists".format(trgt=trgt))
+            LOG.debug("'{trgt}' exists".format(trgt=trgt))
             requirement = FileReq(trgt)
             return requirement, {requirement: set()}
         else:
@@ -391,18 +408,18 @@ def build_orders(req, graph):
     """
     last_req_update = req.last_update()
     if (req not in graph) or (len(graph[req]) == 0):
-        logging.debug("'{req!s}' is a leaf requirement".format(req=req))
+        LOG.debug("'{req!s}' is a leaf requirement".format(req=req))
         if not hasattr(req, 'run'):
-            logging.debug("'{req!s}' is not runnable".format(req=req))
+            LOG.debug("'{req!s}' is not runnable".format(req=req))
             return [set()], last_req_update
         elif not isnan(last_req_update):  # The target already exists:
-            logging.debug("'{req!s}' last updated at {last_update}".\
-                              format(req=req, last_update=last_req_update))
+            LOG.debug("'{req!s}' last updated at {last_update}".\
+                      format(req=req, last_update=last_req_update))
             return [set()], last_req_update
         else:  # The target does not exist and the task is runnable:
-            logging.debug(("'{req!s}' does not exist; the task to create "
-                           "it has been added to the build orders").\
-                          format(req=req))
+            LOG.debug(("'{req!s}' does not exist; the task to create "
+                       "it has been added to the build orders").\
+                      format(req=req))
             return [{req}], last_req_update
     preq_update_times = []
     preq_orders_lists = []
@@ -411,9 +428,9 @@ def build_orders(req, graph):
         preq_orders_lists.append(orders_list)
         preq_update_times.append(update_time)
     last_graph_update = max(preq_update_times)
-    logging.debug(("the most recent update of a pre-requisite for "
-                   "'{req!s}' was at {last_update}").\
-                       format(req=req, last_update=last_graph_update))
+    LOG.debug(("the most recent update of a pre-requisite for "
+               "'{req!s}' was at {last_update}").\
+              format(req=req, last_update=last_graph_update))
     preq_orders_list = list(merge_orders(*preq_orders_lists))
     # Remember that last_graph_update is *nan* if _any_ prereq is nan.
     # last_req_update is nan if the target file does not currently exist.
@@ -421,11 +438,11 @@ def build_orders(req, graph):
     # possibilities occurs (plus the canonical case, when any precursor
     # was updated more recently than the focal requirement.)
     if last_graph_update < last_req_update:
-        logging.debug("'{req!s}' is up-to-date".format(req=req))
+        LOG.debug("'{req!s}' is up-to-date".format(req=req))
         return [set()], last_req_update
     else:
-        logging.debug("'{req!s}' is not up-to-date and will be updated.".\
-                      format(req=req))
+        LOG.debug("'{req!s}' is not up-to-date and will be updated.".\
+                  format(req=req))
         return [{req}] + preq_orders_list, last_graph_update
 
 
@@ -437,17 +454,16 @@ def run_orders(orders, parallel=False, **kwargs):
     """
     kwargs['exc_event'] = exc_event = Event()
     for order_set in reversed(orders):
-        threads = [Thread(target=task.run, kwargs=kwargs)
-                   for task in order_set]
         if parallel:
+            threads = [Thread(target=task.run, kwargs=kwargs)
+                       for task in order_set]
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
         else:
-            for thread in threads:
-                thread.start()
-                thread.join()
+            for task in order_set:
+                task.run(**kwargs)
         if exc_event.is_set():
             raise Exception("At least one order failed in this set.  No more "
                             "orders will be excecuted.")
@@ -488,6 +504,12 @@ def visualize_graph(trgt, rules, outpath):
 
 
 def maker(rules):
+
+    # Name the logger after the calling module
+    import __main__
+    global LOG
+    LOG = logging.getLogger(__main__.__file__)
+
     usage = "usage: %prog [options] [TARGET]"
     parser = optparse.OptionParser(usage=usage)
     parser.add_option("-q", "--quiet", action="store_const",
@@ -521,11 +543,24 @@ def maker(rules):
                             "more '-V' flags. Variables passed in this "
                             "fasion override variables defined in any other "
                             "way"))
+    parser.add_option("-d", "--debug", dest="debug",
+                      default=False, action="store_true",
+                      help=("display full debug messages with headers. "
+                            "DEFAULT: False"))
     opts, args = parser.parse_args()
 
-    logging.basicConfig(level=[logging.ERROR,
-                               logging.INFO,
-                               logging.DEBUG][opts.verbose])
+    if opts.debug:
+        logging.basicConfig(level=logging.DEBUG, format=("%(name)s:"
+                                                         "(%(thread)s):"
+                                                         "%(levelname)s:"
+                                                         "%(asctime)s\t"
+                                                         "%(message)s"))
+    else:
+        logging.basicConfig(level=[logging.ERROR,
+                                   logging.INFO,
+                                   logging.DEBUG][opts.verbose],
+                            format="%(message)s")
+
 
     if len(args) == 1:
         target = args[0]
