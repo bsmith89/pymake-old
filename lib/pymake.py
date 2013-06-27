@@ -290,16 +290,23 @@ class TaskReq(FileReq):
         LOG.debug("running task for '{self.target}'".format(self=self))
         msg = "{self.recipe}".format(self=self)
         for line in lines(msg):
-            LOG.info("in: " + line)
+            LOG.info("| in| " + line)
         if execute:
             with backup_existing_while(self.target, prepend='.',
                                        extension='~pymake_backup',
                                        else_on_fail=os.remove):
                 logging.debug("executing recipe for '{self.target}'".\
                               format(self=self))
-                output = subprocess.check_output(self.recipe, shell=True)
-                for line in lines(output.decode()):
-                    LOG.info("out: " + line)
+                proc = subprocess.Popen(self.recipe, shell=True,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        bufsize=4096)
+                for line in proc.stdout:
+                    line = line.decode()
+                    LOG.info("|out| " + line.rstrip('\n'))
+                if proc.wait() != 0:
+                    raise subprocess.CalledProcessError(proc.returncode,
+                                                        self.recipe)
 
 
 def lines(string):
@@ -550,8 +557,8 @@ def maker(rules):
     opts, args = parser.parse_args()
 
     if opts.debug:
-        logging.basicConfig(level=logging.DEBUG, format=("%(name)s:"
-                                                         "(%(thread)s):"
+        logging.basicConfig(level=logging.DEBUG, format=("(%(thread)s):"
+                                                         "%(name)s:"
                                                          "%(levelname)s:"
                                                          "%(asctime)s\t"
                                                          "%(message)s"))
