@@ -288,8 +288,8 @@ class TaskReq(FileReq):
     def run(self, verbose=1, execute=True, exc_event=None, **kwargs):
         """Run the task to create the target."""
         LOG.debug("running task for '{self.target}'".format(self=self))
-        msg = "{self.recipe}".format(self=self)
-        for line in lines(msg):
+        msg = "{self.recipe}".format(self=self).rstrip('\n')
+        for line in msg.split('\n'):
             LOG.info("| in| " + line)
         if execute:
             with backup_existing_while(self.target, prepend='.',
@@ -307,16 +307,6 @@ class TaskReq(FileReq):
                 if proc.wait() != 0:
                     raise subprocess.CalledProcessError(proc.returncode,
                                                         self.recipe)
-
-
-def lines(string):
-    lines = string.split('\n')
-    if lines[0] == '':
-        del lines[0]
-    if lines and (lines[-1] == ''):
-        del lines[-1]
-    for line in lines:
-        yield line
 
 
 class DummyReq(Requirement):
